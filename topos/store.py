@@ -288,3 +288,32 @@ class Store:
             raise StoreError(t(f"usuario inválido {user!r}", f"invalid user {user!r}"))
         if user not in self.state["enrolled"]:
             self.state["enrolled"].append(user)
+
+    # -- red / network -----------------------------------------------------
+
+    @property
+    def net(self):
+        return self.state.setdefault("net", {"allow": {}, "trusted": []})
+
+    def net_allow(self, user, hosts):
+        """Hosts a los que `user` puede conectarse (acepta `*.dominio`)."""
+        for h in hosts:
+            _check_host(h)
+        allowed = set(self.net["allow"].get(user, [])) | {h.lower() for h in hosts}
+        self.net["allow"][user] = sorted(allowed)
+
+    def net_revoke(self, user, hosts):
+        allowed = set(self.net["allow"].get(user, [])) - {h.lower() for h in hosts}
+        self.net["allow"][user] = sorted(allowed)
+
+    def net_trust(self, host):
+        """Un destino de confianza puede recibir cualquier dato (p. ej. el modelo local)."""
+        _check_host(host)
+        if host.lower() not in self.net["trusted"]:
+            self.net["trusted"].append(host.lower())
+
+
+def _check_host(host):
+    h = host.lower()
+    if not h or any(c in h for c in "/@\\: ") or h.strip("*.") == "":
+        raise StoreError(t(f"host inválido {host!r}", f"invalid host {host!r}"))

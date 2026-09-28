@@ -13,6 +13,14 @@ fi
 mkdir -p "$HOME/mundo"
 mountpoint -q "$HOME/mundo" || topos mount "$HOME/mundo" --background --shared
 tr "mundo montado en $HOME/mundo" "world mounted at $HOME/mundo"
+if [ -n "${TOPOS_PROXY:-}" ] && sudo -n nft list tables >/dev/null 2>&1; then
+    # Red: los agentes sólo salen por el proxy de topos (hace falta NET_ADMIN).
+    # Network: agents only get out through the topos proxy (needs NET_ADMIN).
+    sudo -n env TOPOS_HOME="$TOPOS_HOME" TOPOS_LANG="${TOPOS_LANG:-}" topos net proxy >/dev/null 2>&1 &
+    sudo -n env TOPOS_HOME="$TOPOS_HOME" TOPOS_LANG="${TOPOS_LANG:-}" topos net enforce
+elif [ -n "${TOPOS_PROXY:-}" ]; then
+    tr "sin NET_ADMIN: la red de los agentes queda sin candado" "no NET_ADMIN: agent network is not locked"
+fi
 if [ -n "${TOPOS_OLLAMA:-}" ]; then
     # El modelo se baja en segundo plano para que el planificador no espere.
     # The model downloads in the background so the scheduler does not wait.

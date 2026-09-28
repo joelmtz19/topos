@@ -32,6 +32,7 @@ import os
 import pwd
 import stat
 import time
+from pathlib import Path
 from contextlib import redirect_stdout
 
 try:
@@ -39,6 +40,7 @@ try:
 except ImportError:  # Debian empaqueta fusepy con su propio nombre
     from fusepy import FUSE, FuseOSError, Operations, fuse_get_context
 
+from .flow import Sessions, session_of
 from .store import Store, StoreError
 
 REPORTS = {"betti": ["betti"], "holes": ["holes"], "perm": ["perm", "show"]}
@@ -52,9 +54,11 @@ class ToposFS(Operations):
         self.handles = {}   # fh → [vértice, bytearray, sucio, sesión | None]
         self.next_fh = 1
         # Flujo de información: lo que cada sesión ha leído (sesión = uid + sesión de Linux,
-        # así `cat secreto > publico` desde la misma terminal también cuenta).
-        # Information flow: what each session has read (uid + Linux session id).
-        self.contexts = {}
+        # así `cat secreto > publico` desde la misma terminal también cuenta). Vive en disco
+        # para sobrevivir a un remontaje y para que el proxy de red lo consulte.
+        # Information flow: what each session has read; on disk so it survives remounts
+        # and the network proxy can read it.
+        self.sessions = Sessions(Path(root) / ".topos")
 
     def _store(self):
         # Se relee en cada llamada para que los cambios del CLI se vean al instante.
@@ -66,12 +70,7 @@ class ToposFS(Operations):
 
     def _session(self):
         uid, _, pid = fuse_get_context()
-        try:
-            with open(f"/proc/{pid}/stat") as f:
-                sid = int(f.read().rsplit(")", 1)[1].split()[3])
-        except (OSError, IndexError, ValueError):
-            sid = pid
-        return uid, sid
+        return uid, session_of(pid)
 
     def _is_owner(self):
         return self._caller()[0] in (0, os.getuid())
@@ -80,8 +79,7 @@ class ToposFS(Operations):
         """La sesión que abre `vertex` para leer ya carga su contenido y sus fuentes."""
         if vertex is None or self._is_owner():
             return
-        ctx = self.contexts.setdefault(self._session(), set())
-        ctx |= {vertex} | self._store().sources(vertex)
+        self.sessions.add(*self._session(), {vertex} | self._store().sources(vertex))
 
     def _user(self):
         uid = self._caller()[0]
@@ -367,8 +365,8 @@ class ToposFS(Operations):
             s.add_bytes(vertex, bytes(buf))
             # Lo que esta sesión leyó llega al archivo que escribe: las marcas viajan.
             # What this session read flows into what it writes: labels travel.
-            if session is not None and self.contexts.get(session):
-                s.taint(vertex, self.contexts[session])
+            if session is not None:
+                s.taint(vertex, self.sessions.get(*session))
             self._commit(s)
         h[2] = False
 

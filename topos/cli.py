@@ -25,6 +25,8 @@ USAGE_ES = """topos: una capa topológica sobre Linux.
     topos perm enroll USUARIO          lo mete al haz sin darle nada
     topos perm show | check | cohomology
     topos flow show | declassify N     qué datos llegaron a qué archivos
+    topos net allow AGENTE HOST… | trust HOST | show | proxy | enforce
+                                       red: el destino es un lector más
     topos paths PROGRAMA.txt           deadlocks y clases de dihomotopía
     topos run PROGRAMA.txt [--naive] [--runs N]   lo ejecuta con hilos reales
     topos sched serve | status | run NOMBRE PROGRAMA.txt
@@ -56,6 +58,8 @@ USAGE_EN = """topos: a topological layer over Linux.
     topos perm enroll USER             put a user in the sheaf with nothing granted
     topos perm show | check | cohomology
     topos flow show | declassify N     which data reached which files
+    topos net allow AGENT HOST… | trust HOST | show | proxy | enforce
+                                       network: the destination is one more reader
     topos paths PROGRAM.txt            deadlocks and dihomotopy classes
     topos run PROGRAM.txt [--naive] [--runs N]    run it with real threads
     topos sched serve | status | run NAME PROGRAM.txt
@@ -157,6 +161,32 @@ def parser():
                t("quita las marcas de un archivo (sólo el dueño)", "clear a file's marks (owner only)"),
                "desclasificar")
     x.add_argument("name")
+
+    c = cmd("net", None, t("red: a dónde puede hablar cada agente y qué datos pueden salir",
+                           "network: where each agent may talk and which data may leave"), "red")
+    nsub = c.add_subparsers(required=True, metavar=t("ACCIÓN", "ACTION"))
+    x = action(nsub, "allow", cmd_net_allow, t("hosts a los que un agente puede conectarse",
+                                              "hosts an agent may connect to"), "permitir")
+    x.add_argument("user")
+    x.add_argument("hosts", nargs="+")
+    x = action(nsub, "revoke", cmd_net_revoke, t("quita hosts a un agente", "remove hosts from an agent"),
+               "quitar")
+    x.add_argument("user")
+    x.add_argument("hosts", nargs="+")
+    x = action(nsub, "trust", cmd_net_trust, t("destino de confianza: recibe cualquier dato",
+                                              "trusted destination: may receive any data"), "confiar")
+    x.add_argument("host")
+    action(nsub, "show", cmd_net_show, t("la política de red", "the network policy"), "ver")
+    x = action(nsub, "check", cmd_net_check, t("¿puede este agente mandar lo que leyó a este host?",
+                                              "may this agent send what it read to this host?"), "probar")
+    x.add_argument("user")
+    x.add_argument("host")
+    for name, fn, help, es in (
+            ("proxy", cmd_net_proxy, t("arranca el proxy (como root)", "start the proxy (as root)"), None),
+            ("enforce", cmd_net_enforce, t("candado del kernel: los agentes sólo salen por el proxy",
+                                           "kernel lock: agents only get out through the proxy"), "aplicar")):
+        x = action(nsub, name, fn, help, es)
+        x.add_argument("--port", "--puerto", dest="port", type=int, default=3128)
 
     c = cmd("paths", cmd_paths, t("procesos como caminos", "processes as paths"), "caminos")
     c.add_argument("program")
@@ -477,6 +507,73 @@ def cmd_flow_declassify(a):
             f"{a.name}: no marks (before: {', '.join(sorted(before)) or 'none'})"))
 
 
+# -- red / network ------------------------------------------------------------
+
+def cmd_net_allow(a):
+    s = Store.find()
+    s.net_allow(a.user, a.hosts)
+    s.save()
+    print(t(f"{a.user} puede conectarse a: {', '.join(s.net['allow'][a.user])}",
+            f"{a.user} may connect to: {', '.join(s.net['allow'][a.user])}"))
+
+
+def cmd_net_revoke(a):
+    s = Store.find()
+    s.net_revoke(a.user, a.hosts)
+    s.save()
+
+
+def cmd_net_trust(a):
+    s = Store.find()
+    s.net_trust(a.host)
+    s.save()
+    print(t(f"{a.host} es de confianza: puede recibir cualquier dato",
+            f"{a.host} is trusted: it may receive any data"))
+
+
+def cmd_net_show(a):
+    s = Store.find()
+    net = s.net
+    if not net["allow"] and not net["trusted"]:
+        print(t("sin política de red: los agentes inscritos no pueden conectarse a nada",
+                "no network policy: enrolled agents cannot connect anywhere"))
+    for user, hosts in sorted(net["allow"].items()):
+        print(f"{user}: {', '.join(hosts) or '—'}")
+    if net["trusted"]:
+        print(t("de confianza: ", "trusted: ") + ", ".join(net["trusted"]))
+    r = s.sheaf()
+    readers = sorted(u for u in r.users if u.startswith("net/"))
+    for principal in readers:
+        files = [v for v in s.vertices if r.mode(v, principal)[0] == "r"]
+        print(t(f"{principal[4:]} puede recibir: {', '.join(files) or 'nada'}",
+                f"{principal[4:]} may receive: {', '.join(files) or 'nothing'}"))
+
+
+def cmd_net_check(a):
+    import pwd
+    from .flow import Sessions
+    from .net import decide
+    s = Store.find()
+    read = Sessions(s.meta).of_user(pwd.getpwnam(a.user).pw_uid)
+    ok, why = decide(s, a.user, read, a.host)
+    print(("✓ " if ok else "✗ ") + why)
+    return 0 if ok else 2
+
+
+def cmd_net_proxy(a):
+    from .net import serve
+    s = Store.find()
+    print(t(f"proxy de topos en 127.0.0.1:{a.port}", f"topos proxy on 127.0.0.1:{a.port}"), flush=True)
+    serve(str(s.root), a.port)
+
+
+def cmd_net_enforce(a):
+    from .net import enforce
+    uids = enforce(Store.find(), a.port)
+    print(t(f"candado aplicado: {len(uids)} agente(s) sólo salen por 127.0.0.1:{a.port}",
+            f"lock applied: {len(uids)} agent(s) only get out through 127.0.0.1:{a.port}"))
+
+
 # -- procesos y memoria / processes and memory ------------------------------
 
 def cmd_paths(a):
@@ -632,15 +729,29 @@ def cmd_agent_create(a):
     if subprocess.run(["id", a.name], capture_output=True).returncode:
         subprocess.run(["sudo", "-n", "useradd", "--system", "--no-create-home",
                         "--shell", "/usr/sbin/nologin", a.name], check=True)
+    import os
+    from urllib.parse import urlparse
     s = Store.find()
     s.enroll(a.name)
     for spec in a.grant:
         rel, _, bits = spec.partition(":")
         s.set_values("@" + rel, [f"+{a.name}:{bits or 'r'}"])
+    proxy = os.environ.get("TOPOS_PROXY")
+    model_host = urlparse(os.environ.get("TOPOS_OLLAMA", "")).hostname
+    if proxy and model_host:
+        # Con candado de red, el agente sólo sale por el proxy; el modelo tiene que ver
+        # los datos para trabajar, así que su host se permite y es de confianza.
+        s.net_allow(a.name, [model_host])
+        s.net_trust(model_host)
     s.save()
     granted = ", ".join(a.grant) or t("nada", "nothing")
     print(t(f"{a.name}: usuario de Linux, inscrito en el haz; se le concede {granted}",
             f"{a.name}: Linux user, enrolled in the sheaf; granted {granted}"))
+    if proxy:
+        r = subprocess.run(["sudo", "-n", "env", f"TOPOS_HOME={s.root}", "topos", "net", "enforce"],
+                           capture_output=True, text=True)
+        print(r.stdout.strip() or t("  (no se pudo aplicar el candado de red: ¿falta NET_ADMIN?)",
+                                    "  (could not apply the network lock: missing NET_ADMIN?)"))
 
 
 def cmd_agent_run(a):
@@ -650,7 +761,10 @@ def cmd_agent_run(a):
     if _whoami() != a.name:
         # El modelo corre como el usuario del agente: lo que el haz le niega, el kernel se lo niega.
         # The model runs as the agent's user: what the sheaf denies, the kernel denies.
-        argv = ["sudo", "-n", "-u", a.name, "env", f"TOPOS_LANG={t('es', 'en')}",
+        proxy = os.environ.get("TOPOS_PROXY")
+        via = [f"{k}={proxy}" for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")] \
+            if proxy else []
+        argv = ["sudo", "-n", "-u", a.name, "env", f"TOPOS_LANG={t('es', 'en')}", *via,
                 sys.executable, "-m", "topos", "agent", "run", a.name, a.task, "--world", world,
                 "--model", a.model or agent.DEFAULT_MODEL,
                 "--ollama", a.ollama or agent.DEFAULT_OLLAMA or agent.find_ollama()]

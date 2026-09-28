@@ -10,7 +10,7 @@ FROM debian:bookworm-slim AS base
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-fusepy fuse libfuse2 sudo bash-completion less nano vim-tiny \
-        procps psmisc iproute2 kmod locales ca-certificates \
+        procps psmisc iproute2 kmod locales ca-certificates nftables curl \
  && sed -i 's/^# *\(es_MX.UTF-8\)/\1/; s/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen && locale-gen \
  && echo 'LANG=C.UTF-8' > /etc/default/locale \
  && rm -rf /var/lib/apt/lists/*
@@ -27,6 +27,9 @@ RUN chmod 755 /usr/local/bin/* \
  && chmod 711 /home/topos  && echo user_allow_other >> /etc/fuse.conf  && install -d -m 1777 /var/log/topos  && install -d -o topos -g topos /home/topos/.mundo /home/topos/mundo && python3 -m compileall -q /usr/lib/python3/dist-packages/topos
 USER topos
 WORKDIR /home/topos
+# También para comandos sin shell interactiva (`docker compose exec topos topos …`).
+# Also for non-interactive commands.
+ENV TOPOS_HOME=/home/topos/.mundo TOPOS_SCHED=/tmp/topos-sched.sock
 CMD ["bash", "-l"]
 
 FROM base AS live

@@ -42,10 +42,13 @@ services:
       TOPOS_OLLAMA: ${TOPOS_OLLAMA:-http://ollama:11434}
       TOPOS_MODEL: ${TOPOS_MODEL:-qwen3:4b}
       TOPOS_LANG: ${TOPOS_LANG:-}
+      # Los agentes sólo salen a la red por este proxy / agents only reach the network through it
+      TOPOS_PROXY: http://127.0.0.1:3128
     devices:
       - /dev/fuse
     cap_add:
       - SYS_ADMIN
+      - NET_ADMIN
     security_opt:
       - apparmor:unconfined
     volumes:
