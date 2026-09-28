@@ -52,3 +52,13 @@ def test_removing_a_file_leaves_unrelated_relations_alone(s):
     s.remove_vertex("a")
     assert "vacia" in s.relations and s.members("suelto") == ["c"]
     assert s.members("p") == ["b"] or "p" not in s.relations
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "getuid"), reason="POSIX")
+def test_the_store_is_owner_only(tmp_path):
+    import os
+    s = Store.init(tmp_path / "w")
+    assert os.stat(s.meta).st_mode & 0o777 == 0o700
+    os.chmod(s.meta, 0o755)                         # un almacén viejo, demasiado abierto
+    Store(tmp_path / "w")
+    assert os.stat(s.meta).st_mode & 0o777 == 0o700

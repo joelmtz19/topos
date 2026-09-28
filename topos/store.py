@@ -34,6 +34,7 @@ class Store:
         self.root = Path(root)
         self.meta = self.root / META
         self.state = json.loads((self.meta / "state.json").read_text(encoding="utf-8"))
+        _private(self.meta)
         self.state.setdefault("mtimes", {})   # almacenes viejos no las tenían
         self.state.setdefault("enrolled", [])
         # Flujo de información: vértice → vértices cuyo contenido llegó hasta él.
@@ -46,6 +47,7 @@ class Store:
         if meta.exists():
             raise StoreError(t(f"ya hay un almacén en {meta}", f"there is already a store at {meta}"))
         (meta / "objects").mkdir(parents=True)
+        _private(meta)
         empty = {"vertices": {}, "relations": {}, "govern": {}, "values": {}, "mtimes": {}}
         (meta / "state.json").write_text(json.dumps(empty, indent=2), encoding="utf-8")
         return cls(root)
@@ -320,6 +322,18 @@ class Store:
         _check_host(host)
         if host.lower() not in self.net["trusted"]:
             self.net["trusted"].append(host.lower())
+
+
+def _private(meta):
+    """`.topos` sólo para su dueño: ahí están los contenidos en claro y la política. Si
+    otros usuarios pudieran leerlo, un agente se saltaría FUSE y el haz leyendo el disco.
+    `.topos` is owner-only: it holds contents in the clear, so an agent could otherwise
+    bypass FUSE and the sheaf by reading the disk directly."""
+    try:
+        if meta.stat().st_uid == os.getuid() and meta.stat().st_mode & 0o077:
+            os.chmod(meta, 0o700)
+    except (OSError, AttributeError):
+        pass            # Windows no tiene getuid ni modos POSIX
 
 
 def _check_host(host):

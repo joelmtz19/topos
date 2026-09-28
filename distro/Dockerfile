@@ -24,7 +24,7 @@ RUN chmod 755 /usr/local/bin/* \
  && useradd -m -s /bin/bash -G sudo topos \
  && echo 'topos:topos' | chpasswd && echo 'root:topos' | chpasswd \
  && echo 'topos ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/topos && chmod 440 /etc/sudoers.d/topos \
- && chmod 711 /home/topos  && echo user_allow_other >> /etc/fuse.conf  && install -d -m 1777 /var/log/topos  && install -d -o topos -g topos /home/topos/.mundo /home/topos/mundo && python3 -m compileall -q /usr/lib/python3/dist-packages/topos
+ && chmod 711 /home/topos  && echo user_allow_other >> /etc/fuse.conf  && install -d -m 1777 /var/log/topos  && install -d -m 700 -o topos -g topos /home/topos/.mundo && install -d -o topos -g topos /home/topos/mundo && python3 -m compileall -q /usr/lib/python3/dist-packages/topos
 USER topos
 WORKDIR /home/topos
 # También para comandos sin shell interactiva (`docker compose exec topos topos …`).
