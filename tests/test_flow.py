@@ -80,10 +80,22 @@ def test_copying_payroll_into_work_does_not_leak_it(fs):
     assert read(fs, "/files/summary") == b"Ana gana 38417"      # quien lee la fuente, lee la copia
 
 
-def test_a_session_that_read_nothing_secret_leaves_no_mark(fs):
+def test_laundering_across_sessions_does_not_strip_the_mark(fs):
+    # Red team F1: leer el secreto en una sesión y escribir en otra "limpia" no lo lava,
+    # porque la marca es por agente (uid), no por sesión.
     be(fs, ALICE, session=1)
     read(fs, "/files/payroll")
     be(fs, ALICE, session=2)                                     # otra terminal / otro proceso
+    write_new(fs, "/relations/work/leak", b"38417")
+    assert Store(fs.root).sources("leak") == {"payroll"}
+    be(fs, BOB)
+    assert denied(fs.open, "/files/leak", os.O_RDONLY)
+
+
+def test_a_different_agent_that_read_nothing_writes_clean(fs):
+    be(fs, ALICE)
+    read(fs, "/files/payroll")
+    be(fs, CAROL)                                                # otro uid: no ha leído nada secreto
     write_new(fs, "/relations/work/notes", b"sin secretos")
     assert Store(fs.root).sources("notes") == set()
     be(fs, BOB)

@@ -50,8 +50,10 @@ def test_trusted_destination_receives_anything(s):
     assert net.decide(s, "agent", {"payroll"}, "ollama")[0]
 
 
-def test_users_without_policy_are_not_restricted(s):
-    assert net.decide(s, "someone-else", {"payroll"}, "anywhere.example")[0]
+def test_unknown_users_at_the_proxy_are_denied(s):
+    # Red team F4: default-deny. Al proxy sólo deberían llegar agentes inscritos.
+    ok, why = net.decide(s, "someone-else", set(), "anywhere.example")
+    assert not ok and ("negado" in why or "denied" in why)
 
 
 def test_invalid_hosts_are_rejected(s):

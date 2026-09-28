@@ -18,11 +18,20 @@ def fs(tmp_path, monkeypatch):
         s.add_bytes(n, n.encode())
     s.glue(["a", "b"], "p")
     s.save()
+    # Por omisión el que llama es el dueño del mundo (quien monta), como en las pruebas de
+    # mecánica del sistema de archivos. Las pruebas de permisos se vuelven `alice` con as_alice.
     f = ToposFS(str(tmp_path))
-    monkeypatch.setattr(f, "_user", lambda: "alice")
-    monkeypatch.setattr(f, "_caller", lambda: (1000, 1000))
-    monkeypatch.setattr(f, "_session", lambda: (1000, 1))
+    monkeypatch.setattr(f, "_user", lambda: "owner")
+    monkeypatch.setattr(f, "_caller", lambda: (os.getuid(), os.getgid()))
+    monkeypatch.setattr(f, "_session", lambda: (os.getuid(), 1))
     return f
+
+
+def as_alice(fs):
+    """Deja de ser el dueño: un usuario cualquiera (1000), sujeto al haz."""
+    fs._user = lambda: "alice"
+    fs._caller = lambda: (1000, 1000)
+    fs._session = lambda: (1000, 1)
 
 
 def store(fs):
@@ -86,6 +95,7 @@ def test_rename_between_relations_and_atomic_save(fs):
 
 
 def test_sheaf_governs_writes_and_chmod(fs):
+    as_alice(fs)
     s = store(fs)
     s.govern("p", ["alice:rw"])
     s.set_values("a", ["+alice:r", "-alice:w"])
@@ -124,6 +134,7 @@ def test_mtimes_follow_writes_and_touch(fs):
 
 
 def test_access_and_owner_match_the_sheaf(fs):
+    as_alice(fs)
     assert fs.getattr("/files/a")["st_uid"] == 1000
     s = store(fs)
     s.govern("p", ["alice:r"])
@@ -135,6 +146,7 @@ def test_access_and_owner_match_the_sheaf(fs):
 
 
 def test_enrolled_user_starts_with_nothing(fs):
+    as_alice(fs)
     s = store(fs)
     s.enroll("alice")
     s.save()
@@ -147,6 +159,7 @@ def test_enrolled_user_starts_with_nothing(fs):
 
 
 def test_gluing_cannot_escalate_privileges(fs):
+    as_alice(fs)
     s = store(fs)
     s.add_bytes("secreto", b"nomina")
     s.create_relation("mia")

@@ -273,7 +273,11 @@ class ToposFS(Operations):
             return 0o444
         s = self._store()
         r = s.sheaf()
-        mode = self._mode_for(s, r, vertex, self._user())
+        # El dueño del mundo (quien monta) ve todo; cualquier otro que el haz no mencione
+        # no ve nada. Nada de fail-open: en un montaje compartido, un usuario que nunca se
+        # inscribió —o uno que se olvidó inscribir— no debe poder leerlo todo.
+        # The world owner sees everything; anyone else the sheaf never mentions sees nothing.
+        mode = 0o777 if self._is_owner() else self._mode_for(s, r, vertex, self._user())
         if getattr(self, "_acting", None) is not None:
             mode &= self._mode_for(s, r, vertex, self._acting)
         return mode
@@ -281,7 +285,7 @@ class ToposFS(Operations):
     @staticmethod
     def _mode_for(s, r, vertex, user):
         if user not in r.users:
-            return 0o666
+            return 0            # default-deny: sin sección del haz, no hay acceso
         bits = r.mode(vertex, user)
         mode = sum(m for c, m in zip(bits, (0o400, 0o200, 0o100)) if c in "rwx")
         # Leer algo exige poder leer todo lo que fluyó hasta ahí: si la nómina llegó a un
@@ -430,10 +434,14 @@ class ToposFS(Operations):
         s = self._store()
         if vertex in s.state["vertices"]:
             s.add_bytes(vertex, bytes(buf))
-            # Lo que esta sesión leyó llega al archivo que escribe: las marcas viajan.
-            # What this session read flows into what it writes: labels travel.
+            # Todo lo que este agente (uid) leyó llega al archivo que escribe. Se marca por
+            # uid, no por sesión: si no, bastaba leer el secreto en una terminal, sacarlo a
+            # /tmp y volverlo a meter en otra sesión para lavar la marca.
+            # Everything this agent (uid) has read flows into what it writes — keyed by uid,
+            # not session, so laundering a secret through /tmp in a fresh session cannot strip
+            # the label.
             if session is not None:
-                s.taint(vertex, self.sessions.get(*session))
+                s.taint(vertex, self.sessions.of_user(session[0]))
             self._commit(s)
         h[2] = False
 

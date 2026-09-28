@@ -48,7 +48,10 @@ def decide(store, user, read, host):
     """(permitido, motivo). `read` = lo que la sesión ya leyó."""
     r = store.sheaf()
     if user not in r.users:
-        return True, t("usuario sin política de red", "user has no network policy")
+        # Default-deny: al proxy sólo deberían llegar agentes inscritos (el candado del
+        # kernel es por uid de agente). Un usuario desconocido aquí es una anomalía.
+        # Default-deny: only enrolled agents should reach the proxy.
+        return False, t("usuario sin política de red: negado", "user has no network policy: denied")
     if not any(host_matches(host, p) for p in store.net["allow"].get(user, [])):
         return False, t(f"{user} no tiene permitido conectarse a {host}",
                         f"{user} is not allowed to connect to {host}")
@@ -227,7 +230,11 @@ class Handler(socketserver.StreamRequestHandler):
             return self._reply(403, t("no sé quién llama", "cannot identify the caller"))
         store = Store(srv.root)
         sessions = Sessions(store.meta)
-        read = sessions.get(uid, sid) if sid is not None else sessions.of_user(uid)
+        # Por uid, no por sesión: enviar es dejar leer, y un secreto leído en cualquier
+        # sesión de este agente ya no puede salir por una sesión nueva y limpia.
+        # Keyed by uid, not session: a secret read in any of this agent's sessions cannot
+        # leave through a fresh, empty one.
+        read = sessions.of_user(uid)
         ok, why = decide(store, user, read, host)
         args = {"host": host, "port": port}
         if sid is None:
