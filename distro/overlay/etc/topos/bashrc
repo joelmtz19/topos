@@ -1,0 +1,35 @@
+# topOS: el mundo topológico de cada usuario. Se carga desde ~/.bashrc.
+case $- in *i*) ;; *) return 0 ;; esac
+
+export TOPOS_HOME="$HOME/.mundo"
+export TOPOS_SCHED=/tmp/topos-sched.sock
+
+if [ ! -f "$TOPOS_HOME/.topos/state.json" ]; then
+    mkdir -p "$TOPOS_HOME" && (cd "$TOPOS_HOME" && topos init >/dev/null && topos-tour >/dev/null 2>&1)
+fi
+mkdir -p "$HOME/mundo"
+if [ -e /dev/fuse ] && ! mountpoint -q "$HOME/mundo"; then
+    topos mount "$HOME/mundo" --background --shared 2>/dev/null
+fi
+if ! topos sched status >/dev/null 2>&1; then
+    (setsid topos sched serve >/dev/null 2>&1 &)
+    for _ in 1 2 3 4 5 6 7 8 9 10; do [ -S "$TOPOS_SCHED" ] && break; sleep 0.1; done
+fi
+
+# El prompt lleva los números de Betti del mundo; se recalculan sólo cuando cambia.
+__topos_betti() {
+    local m
+    m=$(stat -c '%.9Y %s' "$TOPOS_HOME/.topos/state.json" 2>/dev/null) || return 0
+    if [ "$m" != "${__TOPOS_M:-}" ]; then
+        __TOPOS_M=$m
+        __TOPOS_B=$(topos betti 2>/dev/null | awk -F' = ' '/^β/ {printf "%s%s", s, $2; s=","}')
+    fi
+}
+PROMPT_COMMAND="__topos_betti${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+PS1='\[\e[38;5;141m\]β(${__TOPOS_B})\[\e[0m\] \[\e[1;36m\]\u@topOS\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
+
+alias mundo='cd ~/mundo'
+if [ -z "${TOPOS_HELLO:-}" ]; then
+    export TOPOS_HELLO=1
+    toposfetch
+fi

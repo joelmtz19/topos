@@ -1,0 +1,9 @@
+# Tres filósofos, tres tenedores, cada uno toma primero el de su izquierda.
+# Con semáforos ingenuos se atoran cuando los tres alcanzan su primer tenedor;
+# el planificador topológico los deja comer sin cambiar el orden de nadie.
+proc Ana:   P(t1) P(t2) come_ana   V(t2) V(t1)
+proc Beto:  P(t2) P(t3) come_beto  V(t3) V(t2)
+proc Caro:  P(t3) P(t1) come_caro  V(t1) V(t3)
+do come_ana:  echo "Ana come con t1 y t2"
+do come_beto: echo "Beto come con t2 y t3"
+do come_caro: echo "Caro come con t3 y t1"

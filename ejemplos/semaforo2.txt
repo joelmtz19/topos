@@ -1,0 +1,6 @@
+# Un semáforo de capacidad 2 con tres procesos: el hueco prohibido es el
+# cubo donde los tres están dentro a la vez.
+sem pool 2
+proc A: P(pool) usa V(pool)
+proc B: P(pool) usa V(pool)
+proc C: P(pool) usa V(pool)

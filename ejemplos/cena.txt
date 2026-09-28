@@ -1,0 +1,4 @@
+# Dos procesos que toman los mismos dos candados en orden opuesto.
+# El cuadrado prohibido tiene una esquina atrapada: ahí vive el deadlock.
+proc A: P(disco) P(impresora) imprime V(impresora) V(disco)
+proc B: P(impresora) P(disco) copia V(disco) V(impresora)

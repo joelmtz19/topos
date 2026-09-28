@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Siembra un mundo de ejemplo con un hueco, para tener algo que explorar.
+set -euo pipefail
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+for n in tesis datos figuras notas presupuesto; do echo "contenido de $n" > "$tmp/$n.md"; done
+cp /usr/share/topos/ejemplos/*.txt "$tmp/"
+topos add "$tmp"/*
+topos glue tesis.md datos.md --as investigacion
+topos glue datos.md figuras.md --as analisis
+topos glue figuras.md tesis.md --as articulo
+topos glue notas.md presupuesto.md --as admin
+topos glue cena.txt ordenado.txt semaforo2.txt filosofos.txt --as programas

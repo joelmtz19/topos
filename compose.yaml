@@ -1,0 +1,61 @@
+# topOS viviendo en Docker: el sistema y su modelo abierto.
+#
+#   docker compose up -d --build        levanta todo (la primera vez baja el modelo)
+#   docker compose exec topos bash -l   entra a topOS
+#   docker compose exec topos topos-demo-agentes
+#
+# El mundo, la bitácora y los modelos viven en volúmenes: sobreviven a `down`.
+# Para usar el Ollama de tu máquina en vez del contenedor:
+#   TOPOS_OLLAMA=http://host.docker.internal:11434 docker compose up -d topos
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-modelos:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      retries: 30
+
+  topos:
+    build:
+      context: .
+      dockerfile: distro/Dockerfile
+      target: base
+    image: topos-os
+    hostname: topOS
+    restart: unless-stopped
+    command: ["topos-servicio"]
+    environment:
+      TOPOS_OLLAMA: ${TOPOS_OLLAMA:-http://ollama:11434}
+      TOPOS_MODELO: ${TOPOS_MODELO:-qwen3:4b}
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - topos-mundo:/home/topos/.mundo
+      - topos-bitacora:/var/log/topos
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "topos", "sched", "status"]
+      interval: 10s
+      retries: 10
+
+volumes:
+  ollama-modelos:
+  topos-mundo:
+  topos-bitacora:

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Arranque de topOS como servicio: mundo, montaje, modelo y planificador.
+set -eu
+export TOPOS_HOME="$HOME/.mundo" TOPOS_SCHED=/tmp/topos-sched.sock
+if [ ! -f "$TOPOS_HOME/.topos/state.json" ]; then
+    (cd "$TOPOS_HOME" && topos init >/dev/null && topos-tour >/dev/null)
+    echo "mundo nuevo en $TOPOS_HOME"
+fi
+mkdir -p "$HOME/mundo"
+mountpoint -q "$HOME/mundo" || topos mount "$HOME/mundo" --background --shared
+echo "mundo montado en $HOME/mundo"
+if [ -n "${TOPOS_OLLAMA:-}" ]; then
+    # El modelo se baja en segundo plano para que el planificador no espere.
+    python3 - <<'PY' &
+import json, os, urllib.request
+url, model = os.environ["TOPOS_OLLAMA"].rstrip("/"), os.environ.get("TOPOS_MODELO", "qwen3:4b")
+have = json.loads(urllib.request.urlopen(f"{url}/api/tags", timeout=30).read())["models"]
+if not any(m["name"] == model for m in have):
+    print(f"bajando {model} en {url}…", flush=True)
+    req = urllib.request.Request(f"{url}/api/pull", json.dumps({"name": model, "stream": False}).encode())
+    urllib.request.urlopen(req, timeout=3600).read()
+print(f"modelo {model} listo en {url}", flush=True)
+PY
+fi
+echo "planificador en $TOPOS_SCHED"
+exec topos sched serve

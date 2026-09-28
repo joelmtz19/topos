@@ -1,0 +1,113 @@
+#!/usr/bin/python3
+"""toposfetch: el sistema y tu mundo de un vistazo.
+
+El dibujo es un complejo de verdad: tres triángulos rellenos alrededor de uno
+vacío. Su homología es β₀ = 1, β₁ = 1: el hueco del centro.
+"""
+
+import os
+import platform
+
+C, M, D, B, R = "\033[1;36m", "\033[38;5;141m", "\033[2m", "\033[1m", "\033[0m"
+
+ART = [
+    f"        {C}●{R}        ",
+    f"       {C}╱{M}▓{C}╲{R}       ",
+    f"      {C}╱{M}▓▓▓{C}╲{R}      ",
+    f"     {C}●─────●{R}     ",
+    f"    {C}╱{M}▓{C}╲{R}   {C}╱{M}▓{C}╲{R}    ",
+    f"   {C}╱{M}▓▓▓{C}╲{R} {C}╱{M}▓▓▓{C}╲{R}   ",
+    f"  {C}●─────●─────●{R}  ",
+    f"                 ",
+    f" {D}β₀ = 1  β₁ = 1{R} ",
+]
+
+
+def read(path, default=""):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
+def os_name():
+    for line in read("/etc/os-release").splitlines():
+        if line.startswith("PRETTY_NAME="):
+            name = line.split("=", 1)[1].strip('"')
+            debian = read("/etc/debian_version")
+            return f"{name} (sobre Debian {debian})" if debian else name
+    return platform.system()
+
+
+def uptime():
+    secs = int(float(read("/proc/uptime", "0").split()[0]))
+    h, m = divmod(secs // 60, 60)
+    return f"{h} h {m} min" if h else f"{m} min"
+
+
+def memory():
+    info = {}
+    for line in read("/proc/meminfo").splitlines():
+        k, _, v = line.partition(":")
+        info[k] = int(v.split()[0]) if v.split() else 0
+    total, avail = info.get("MemTotal", 0), info.get("MemAvailable", 0)
+    return f"{(total - avail) // 1024} MiB / {total // 1024} MiB"
+
+
+def world():
+    try:
+        from topos.store import Store
+        s = Store.find()
+    except Exception:
+        return ["sin mundo (corre `topos init`)"], []
+    h = s.homology(1)
+    sheaf = s.sheaf()
+    obst = len(sheaf.conflicts)
+    lines = [f"{len(s.vertices)} archivos, {len(s.relations)} relaciones",
+             f"β = ({', '.join(map(str, h.betti))})   χ = {h.euler}"]
+    extra = ["sin obstrucciones" if not obst else f"{obst} obstrucción(es) en H¹"
+             if sheaf.bits else "sin permisos declarados"]
+    return lines, extra
+
+
+def sched():
+    try:
+        from topos.sched import DEFAULT_SOCKET, Client
+        c = Client(DEFAULT_SOCKET)
+        n = len(c.call(op="status")["procs"])
+        c.close()
+        return f"activo, {n} proceso(s) coordinados"
+    except Exception:
+        return "apagado (topos sched serve)"
+
+
+def main():
+    import pwd
+    user = pwd.getpwuid(os.getuid()).pw_name
+    mw, perm = world()
+    mount = os.path.expanduser("~/mundo")
+    info = [
+        f"{B}{C}{user}{R}{B}@topOS{R}",
+        f"{D}{'─' * 30}{R}",
+        f"{M}Sistema{R}   {os_name()}",
+        f"{M}Kernel{R}    {platform.release()}",
+        f"{M}Encendido{R} {uptime()}",
+        f"{M}Memoria{R}   {memory()}",
+        f"{M}Mundo{R}     {mw[0]}",
+        *(f"          {x}" for x in mw[1:]),
+        f"{M}Haz{R}       {perm[0] if perm else '—'}",
+        f"{M}Montaje{R}   {'~/mundo' if os.path.ismount(mount) else 'sin montar'}",
+        f"{M}Planif.{R}   {sched()}",
+    ]
+    rows = max(len(ART), len(info))
+    print()
+    for i in range(rows):
+        left = ART[i] if i < len(ART) else " " * 17
+        print(f"  {left}  {info[i] if i < len(info) else ''}")
+    print(f"\n  {D}prueba:{R} cd ~/mundo · cat holes · topos run "
+          f"/usr/share/topos/ejemplos/filosofos.txt · topos --help\n")
+
+
+if __name__ == "__main__":
+    main()

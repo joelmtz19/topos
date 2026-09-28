@@ -1,0 +1,8 @@
+PRETTY_NAME="topOS 0.1 «Betti»"
+NAME="topOS"
+VERSION_ID="0.1"
+VERSION="0.1 (Betti)"
+VERSION_CODENAME=betti
+ID=topos
+ID_LIKE=debian
+HOME_URL="https://unattended.io"

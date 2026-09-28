@@ -1,0 +1,4 @@
+# Mismo trabajo, pero ambos toman los candados en el mismo orden.
+# Sin deadlock; quedan dos clases de ejecución: A entra primero o B entra primero.
+proc A: P(disco) P(impresora) imprime V(impresora) V(disco)
+proc B: P(disco) P(impresora) copia V(impresora) V(disco)
