@@ -276,6 +276,15 @@ def parser():
     c.add_argument("--on-behalf-of", "--a-nombre-de", dest="behalf",
                    help=t("trabaja a nombre de este usuario: sólo ve lo que ambos pueden ver",
                           "work on behalf of this user: only sees what both can see"))
+    cmd("verify", cmd_verify, t("revisa que la bitácora no fue manipulada",
+                                "check the audit log was not tampered with"), "verificar")
+    c = cmd("audit", None, t("bitácora a prueba de manipulación", "tamper-evident audit log"),
+            "auditoria")
+    ausub = c.add_subparsers(required=True, metavar=t("ACCIÓN", "ACTION"))
+    x = action(ausub, "serve", cmd_audit_serve, t("arranca el demonio (como el dueño)",
+                                                 "start the daemon (as the owner)"), "servir")
+    x.add_argument("--socket")
+
     c = cmd("mem", cmd_mem, t("memoria como espacio topológico", "memory as a topological space"),
             "memoria")
     c.add_argument("--writable", "--escribible", dest="writable", action="store_true",
@@ -854,17 +863,56 @@ def cmd_agent_eval(a):
     print(table(results))
 
 
+def _meta_or_none():
+    try:
+        return str(Store.find().meta)
+    except StoreError:
+        return None
+
+
+def cmd_verify(a):
+    from . import audit
+    s = Store.find()
+    problems, total = audit.verify(s.meta)
+    if total == 0:
+        print(t("no hay bitácora protegida que revisar", "no protected log to check"))
+        return
+    if not problems:
+        print(t(f"la bitácora está intacta: {total} entradas encadenadas sin roturas",
+                f"the log is intact: {total} chained entries, no breaks"))
+        return
+    print(t(f"{len(problems)} problema(s) en {total} entradas — la bitácora fue manipulada:",
+            f"{len(problems)} problem(s) in {total} entries — the log was tampered with:"))
+    for line, why in problems:
+        print(f"  {t('línea', 'line')} {line}: {why}")
+    return 2
+
+
+def cmd_audit_serve(a):
+    from .audit import DEFAULT_SOCKET, serve
+    s = Store.find()
+    path = a.socket or DEFAULT_SOCKET
+    print(t(f"demonio de bitácora en {path} → {s.meta}/audit.jsonl",
+            f"audit daemon on {path} → {s.meta}/audit.jsonl"), flush=True)
+    serve(str(s.meta), path)
+
+
 def cmd_agent_log(a):
     import json
     import time
+    from . import audit
     from .agent import LOG
-    try:
-        lines = LOG.read_text(encoding="utf-8").splitlines()[-a.n:]
-    except FileNotFoundError:
-        print(t("la bitácora está vacía", "the log is empty"))
-        return
-    for line in lines:
-        e = json.loads(line)
+    # La bitácora protegida (en `.topos`, encadenada) si existe; si no, el archivo llano.
+    meta = _meta_or_none()
+    if meta and audit.audit_file(meta).exists():
+        entries = list(audit.entries(meta))[-a.n:]
+    else:
+        try:
+            entries = [json.loads(x) for x in LOG.read_text(encoding="utf-8").splitlines()[-a.n:]]
+        except FileNotFoundError:
+            print(t("la bitácora está vacía", "the log is empty"))
+            return
+    for e in entries:
         when = time.strftime("%H:%M:%S", time.localtime(e["t"]))
         status = e.get("status", e.get("estado"))
         mark = {"ok": "✓", "denied": "✗", "negado": "✗", "error": "!"}.get(status, "?")

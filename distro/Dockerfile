@@ -29,7 +29,7 @@ USER topos
 WORKDIR /home/topos
 # También para comandos sin shell interactiva (`docker compose exec topos topos …`).
 # Also for non-interactive commands.
-ENV TOPOS_HOME=/home/topos/.mundo TOPOS_SCHED=/tmp/topos-sched.sock
+ENV TOPOS_HOME=/home/topos/.mundo TOPOS_SCHED=/tmp/topos-sched.sock TOPOS_AUDIT=/tmp/topos-audit.sock
 CMD ["bash", "-l"]
 
 FROM base AS live

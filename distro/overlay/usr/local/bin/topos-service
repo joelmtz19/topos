@@ -3,6 +3,7 @@
 # topOS as a service: world, mount, model and scheduler.
 set -eu
 export TOPOS_HOME="$HOME/.mundo" TOPOS_SCHED=/tmp/topos-sched.sock
+export TOPOS_AUDIT=${TOPOS_AUDIT:-/tmp/topos-audit.sock}
 L=$(python3 -c 'from topos.i18n import lang; print(lang())')
 tr() { if [ "$L" = es ]; then printf '%s\n' "$1"; else printf '%s\n' "$2"; fi; }
 
@@ -13,6 +14,11 @@ fi
 mkdir -p "$HOME/mundo"
 mountpoint -q "$HOME/mundo" || topos mount "$HOME/mundo" --background --shared
 tr "mundo montado en $HOME/mundo" "world mounted at $HOME/mundo"
+# La bitácora a prueba de manipulación: la lleva el dueño, los agentes sólo le mandan líneas.
+# The tamper-evident log: the owner keeps it, agents only send it lines.
+setsid topos audit serve >/dev/null 2>&1 &
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -S "$TOPOS_AUDIT" ] && break; sleep 0.1; done
+tr "bitácora protegida en $TOPOS_AUDIT" "protected log on $TOPOS_AUDIT"
 if [ -n "${TOPOS_PROXY:-}" ] && sudo -n nft list tables >/dev/null 2>&1; then
     # Red: los agentes sólo salen por el proxy de topos (hace falta NET_ADMIN).
     # Network: agents only get out through the topos proxy (needs NET_ADMIN).

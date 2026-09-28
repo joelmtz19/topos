@@ -289,6 +289,13 @@ def run_tool(world, name, args):
 
 
 def log(entry):
+    # Primero el demonio de bitácora (a prueba de manipulación): guarda encadenado en
+    # `.topos`, donde el agente no puede borrar. Si no hay demonio (Windows, pruebas,
+    # `agent eval`), cae al archivo de siempre, que es el modo sin garantías.
+    # The tamper-evident daemon first; fall back to the plain file when there is none.
+    from . import audit
+    if audit.send(entry):
+        return
     try:
         LOG.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
