@@ -1,6 +1,8 @@
-# topos
+<p align="center">
+  <img src="assets/banner.es.png" alt="topos — seguridad para agentes de IA" width="880">
+</p>
 
-**Una capa de seguridad para agentes de IA, hecha de topología.** *(English: [README.md](README.md))*
+<p align="center"><b>Una capa de seguridad para agentes de IA, hecha de topología.</b><br><em>English: <a href="README.md">README.md</a></em></p>
 
 Un agente de IA es tan seguro como lo que puede alcanzar. topos le da a un conjunto de agentes
 que colaboran un mundo compartido donde **lo que cada uno puede leer, escribir y enviar lo hace

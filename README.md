@@ -1,6 +1,8 @@
-# topos
+<p align="center">
+  <img src="assets/banner.png" alt="topos — security for AI agents" width="880">
+</p>
 
-**A security layer for AI agents, built out of topology.** *(Español: [README.es.md](README.es.md))*
+<p align="center"><b>A security layer for AI agents, built out of topology.</b><br><em>Español: <a href="README.es.md">README.es.md</a></em></p>
 
 An AI agent is only as safe as what it can reach. topos gives a set of collaborating agents a
 shared world where **what each one can read, write, and send is enforced by the Linux kernel,
