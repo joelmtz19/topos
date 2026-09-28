@@ -41,9 +41,21 @@ except ImportError:  # Debian empaqueta fusepy con su propio nombre
     from fusepy import FUSE, FuseOSError, Operations, fuse_get_context
 
 from .flow import Sessions, session_of
+from .i18n import t
 from .store import Store, StoreError
 
 REPORTS = {"betti": ["betti"], "holes": ["holes"], "perm": ["perm", "show"]}
+
+
+def _split_as(path):
+    """'/as/bob/files/x' → ('bob', '/files/x'); cualquier otra ruta → (None, ruta)."""
+    parts = path.split("/")
+    if len(parts) >= 3 and parts[1] == "as" and parts[2]:
+        inner = "/" + "/".join(p for p in parts[3:] if p)
+        if inner == "/as" or inner.startswith("/as/"):
+            raise FuseOSError(errno.ENOENT)      # no se anida: a nombre de uno a la vez
+        return parts[2], inner
+    return None, path
 WRITE = os.O_WRONLY | os.O_RDWR
 
 
@@ -59,6 +71,7 @@ class ToposFS(Operations):
         # Information flow: what each session has read; on disk so it survives remounts
         # and the network proxy can read it.
         self.sessions = Sessions(Path(root) / ".topos")
+        self._acting = None     # a nombre de quién va la operación en curso (/as/<quién>/…)
 
     def _store(self):
         # Se relee en cada llamada para que los cambios del CLI se vean al instante.
@@ -75,11 +88,54 @@ class ToposFS(Operations):
     def _is_owner(self):
         return self._caller()[0] in (0, os.getuid())
 
+    # -- a nombre de alguien / on behalf of someone ------------------------
+
+    def __call__(self, op, *args):
+        """FUSE llama todo por aquí. `/as/<quién>/…` es el mismo mundo, pero cada permiso
+        es la intersección de quien llama y de <quién>: un chatbot que atiende a un
+        cliente sólo ve lo que ese cliente podría ver.
+        Every op comes through here. `/as/<who>/…` is the same world where every
+        permission is the intersection of the caller's and <who>'s."""
+        self._acting = None
+        if op in ("link", "rename", "symlink") and len(args) >= 2:
+            p1, a1 = _split_as(args[0])
+            p2, a2 = _split_as(args[1])
+            if p1 != p2:
+                raise FuseOSError(errno.EXDEV)
+            self._acting, args = p1, (a1, a2, *args[2:])
+        elif args and isinstance(args[0], str) and args[0].startswith("/"):
+            self._acting, inner = _split_as(args[0])
+            args = (inner, *args[1:])
+        if self._acting is not None and self._acting not in self._principals():
+            raise FuseOSError(errno.ENOENT)
+        try:
+            return super().__call__(op, *args)
+        finally:
+            self._acting = None
+
+    def _principals(self):
+        return sorted(u for u in self._store().sheaf().users if not u.startswith("net/"))
+
     def _record_read(self, vertex):
-        """La sesión que abre `vertex` para leer ya carga su contenido y sus fuentes."""
+        """La sesión que abre `vertex` para leer ya carga su contenido y sus fuentes.
+        Si su usuario tiene tope de archivos por sesión, abrir uno más de la cuenta se niega:
+        una conversación que lee cientos de registros es una extracción, no un uso normal."""
         if vertex is None or self._is_owner():
             return
-        self.sessions.add(*self._session(), {vertex} | self._store().sources(vertex))
+        s = self._store()
+        uid, sid = self._session()
+        user = self._user()
+        cap = s.limit(user)
+        if cap is not None:
+            opened = self.sessions.opened(uid, sid)
+            if vertex not in opened and len(opened) >= cap:
+                from . import agent
+                agent.log({"t": time.time(), "agent": user, "via": "fuse", "tool": "read",
+                           "args": {"file": vertex}, "status": "denied",
+                           "result": t(f"tope de {cap} archivos por sesión: posible extracción",
+                                       f"cap of {cap} files per session: possible extraction")})
+                raise FuseOSError(errno.EACCES)
+        self.sessions.add(uid, sid, {vertex} | s.sources(vertex), opened=vertex)
 
     def _user(self):
         uid = self._caller()[0]
@@ -143,6 +199,8 @@ class ToposFS(Operations):
         head, rest = parts[0], parts[1:]
         if head in REPORTS and not rest:
             return ("report", head)
+        if head == "as" and not rest:
+            return ("as",)
         if head == "files" and len(rest) <= 1:
             return ("files", *rest)
         if head == "relations" and len(rest) <= 2:
@@ -159,7 +217,10 @@ class ToposFS(Operations):
         w = self._where(path)
         kind, args = w[0], w[1:]
         if kind == "root":
-            return "dir", ["files", "relations", "star", *REPORTS]
+            top = ["files", "relations", "star", *REPORTS]
+            return "dir", top if self._acting else [*top, "as"]
+        if kind == "as" and not self._acting:
+            return "dir", self._principals()
         if kind == "report":
             return "file", None, self._report(args[0])
         if kind == "files":
@@ -210,9 +271,15 @@ class ToposFS(Operations):
     def _mode(self, vertex):
         if vertex is None:
             return 0o444
-        user = self._user()
         s = self._store()
         r = s.sheaf()
+        mode = self._mode_for(s, r, vertex, self._user())
+        if getattr(self, "_acting", None) is not None:
+            mode &= self._mode_for(s, r, vertex, self._acting)
+        return mode
+
+    @staticmethod
+    def _mode_for(s, r, vertex, user):
         if user not in r.users:
             return 0o666
         bits = r.mode(vertex, user)

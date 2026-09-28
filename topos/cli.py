@@ -146,6 +146,12 @@ def parser():
                t("mete a un usuario al haz sin darle nada", "put a user in the sheaf with nothing"),
                "inscribir")
     e.add_argument("user")
+    x = action(psub, "limit", cmd_perm_limit,
+               t("tope de archivos distintos por sesión (contra la extracción masiva)",
+                 "cap on distinct files per session (against bulk extraction)"), "limitar")
+    x.add_argument("user")
+    x.add_argument("--files", "--archivos", dest="files", type=int,
+                   help=t("sin valor, quita el tope", "omit to remove the cap"))
     action(psub, "show", cmd_perm_show, t("tabla de permisos efectivos", "effective permission table"),
            "ver")
     action(psub, "check", cmd_perm_check, t("obstrucciones al pegado", "gluing obstructions"), "revisar")
@@ -246,6 +252,9 @@ def parser():
     x.add_argument("--model", "--modelo", dest="model")
     x.add_argument("--ollama")
     x.add_argument("--socket")
+    x.add_argument("--on-behalf-of", "--a-nombre-de", dest="behalf",
+                   help=t("trabaja a nombre de este usuario: sólo ve lo que ambos pueden ver",
+                          "work on behalf of this user: only sees what both can see"))
     x = action(asub, "eval", cmd_agent_eval, t("compara modelos con las mismas tareas",
                                               "compare models on the same tasks"), "evaluar")
     x.add_argument("--models", "--modelos", dest="models", nargs="+", required=True)
@@ -264,6 +273,9 @@ def parser():
                    help=t("sin herramientas de escritura", "no writing tools"))
     c.add_argument("--resources", "--recursos", dest="resources", nargs="*", default=None,
                    help=t("sólo puede escribir estos archivos", "may only write these files"))
+    c.add_argument("--on-behalf-of", "--a-nombre-de", dest="behalf",
+                   help=t("trabaja a nombre de este usuario: sólo ve lo que ambos pueden ver",
+                          "work on behalf of this user: only sees what both can see"))
     c = cmd("mem", cmd_mem, t("memoria como espacio topológico", "memory as a topological space"),
             "memoria")
     c.add_argument("--writable", "--escribible", dest="writable", action="store_true",
@@ -443,6 +455,14 @@ def cmd_perm_enroll(a):
     s.save()
     print(t(f"{a.user} está en el haz: sólo tendrá lo que se le conceda",
             f"{a.user} is in the sheaf: it only gets what is granted"))
+
+
+def cmd_perm_limit(a):
+    s = Store.find()
+    s.set_limit(a.user, a.files)
+    s.save()
+    print(t(f"{a.user}: tope de {a.files} archivos por sesión", f"{a.user}: cap of {a.files} files per session")
+          if a.files is not None else t(f"{a.user}: sin tope", f"{a.user}: no cap"))
 
 
 def cmd_perm_show(a):
@@ -814,12 +834,15 @@ def cmd_agent_run(a):
             argv += ["--socket", a.socket or os.environ["TOPOS_SCHED"]]
         if a.resources is not None:
             argv += ["--resources", *a.resources]
+        if a.behalf:
+            argv += ["--on-behalf-of", a.behalf]
         sys.stdout.flush()
         os.execvp("sudo", argv)
     _own_session()
     llm = agent.Ollama(a.model or agent.DEFAULT_MODEL, a.ollama)
-    print(f"[{a.name}] {a.task}   ({t('modelo', 'model')} {llm.model})", flush=True)
-    summary = agent.run(a.name, a.task, world, llm, a.resources, a.socket,
+    who = f" → {a.behalf}" if a.behalf else ""
+    print(f"[{a.name}{who}] {a.task}   ({t('modelo', 'model')} {llm.model})", flush=True)
+    summary = agent.run(a.name, a.task, _behalf_root(world, a.behalf), llm, a.resources, a.socket,
                         echo=lambda s: print(s, flush=True))
     print(f"[{a.name}] {summary}")
 
@@ -858,7 +881,18 @@ def cmd_mcp(a):
     from .mcp import serve
     _own_session()
     world = os.path.abspath(os.path.expanduser(a.world or "~/mundo"))
-    serve(world, readonly=a.readonly, resources=a.resources)
+    serve(_behalf_root(world, a.behalf), readonly=a.readonly, resources=a.resources)
+
+
+def _behalf_root(world, behalf):
+    """A nombre de alguien, la raíz es la vista /as/<quién>/ del mundo montado: ahí FUSE
+    da la intersección de permisos, así que ni el modelo puede salirse de ella."""
+    import os
+    if not behalf:
+        return world
+    if "/" in behalf or behalf in ("", ".", ".."):
+        raise ValueError(t(f"usuario inválido {behalf!r}", f"invalid user {behalf!r}"))
+    return os.path.join(world, "as", behalf)
 
 
 def _own_session():

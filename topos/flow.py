@@ -49,8 +49,18 @@ class Sessions:
         # Lo de arranques anteriores ya no corresponde a ningún proceso vivo.
         return {k: v for k, v in data.items() if k.startswith(self.boot + ":")}
 
+    @staticmethod
+    def _entry(v):
+        # Formato viejo: una lista de lo leído. Nuevo: {"read": […], "opened": […]}.
+        return v if isinstance(v, dict) else {"read": list(v), "opened": []}
+
     def get(self, uid, sid):
-        return set(self._load().get(self._key(uid, sid), ()))
+        """Todo lo que le fluyó a la sesión: lo que abrió y las fuentes de eso."""
+        return set(self._entry(self._load().get(self._key(uid, sid), [])).get("read", ()))
+
+    def opened(self, uid, sid):
+        """Sólo los archivos que la sesión abrió para leer (para el tope de extracción)."""
+        return set(self._entry(self._load().get(self._key(uid, sid), [])).get("opened", ()))
 
     def of_user(self, uid):
         """Todo lo que leyó cualquier sesión de uid: el peor caso, si no se sabe cuál es."""
@@ -58,16 +68,18 @@ class Sessions:
         out = set()
         for k, v in self._load().items():
             if k.startswith(prefix):
-                out |= set(v)
+                out |= set(self._entry(v).get("read", ()))
         return out
 
-    def add(self, uid, sid, vertices):
+    def add(self, uid, sid, vertices, opened=None):
         data = self._load()
         key = self._key(uid, sid)
-        merged = set(data.get(key, ())) | set(vertices)
-        if merged == set(data.get(key, ())):
+        old = self._entry(data.get(key, []))
+        read = set(old.get("read", ())) | set(vertices)
+        opens = set(old.get("opened", ())) | ({opened} if opened else set())
+        if read == set(old.get("read", ())) and opens == set(old.get("opened", ())):
             return
-        data[key] = sorted(merged)
+        data[key] = {"read": sorted(read), "opened": sorted(opens)}
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)
