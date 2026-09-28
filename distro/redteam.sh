@@ -43,6 +43,19 @@ echo "== Control: el dueño del mundo sí lee todo"
 grep -q PAYROLL-SECRET "$M/files/payroll.md" && held "el dueño lee sus archivos" \
     || brk "el dueño perdió acceso a su propio mundo"
 
+echo "== F5: reiniciar la sesión (setsid) no reinicia el tope de extracción"
+topos agent create raton --grant finance:r work:r > /dev/null   # payroll, meeting, todo: 3 archivos
+topos perm limit raton --files 2 > /dev/null
+R="sudo -n -u raton"
+$R setsid -w cat "$M/relations/finance/payroll.md" >/dev/null 2>&1     # 1, sesión nueva
+$R setsid -w cat "$M/relations/work/meeting.md"    >/dev/null 2>&1     # 2, sesión nueva
+$R setsid -w cat "$M/relations/work/todo.md"       >/dev/null 2>&1     # 3, sesión nueva → tope
+if topos agent log -n 20 | grep -q "possible extraction\|posible extracción"; then
+    held "F5 el tope por hora/uid frena la extracción aunque cambie de sesión"
+else
+    brk "F5 setsid reinició el tope de extracción"
+fi
+
 echo "== Control (.topos 700): el agente no lee el almacén del disco"
 if $A cat "$TOPOS_HOME/.topos/state.json" >/dev/null 2>&1; then
     brk "el agente leyó .topos/state.json del disco"

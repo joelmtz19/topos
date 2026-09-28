@@ -71,7 +71,9 @@ def test_cannot_hop_out_of_the_view_by_renaming(fs):
     assert denied(fs, "rename", "/as/ana/files/faq.md", "/files/faq2.md") == errno.EXDEV
 
 
-def test_extraction_cap_per_session(fs):
+def test_extraction_cap_is_per_agent_not_per_session(fs):
+    # Red team round 2: el tope va por agente y hora, no por sesión, así que abrir una
+    # sesión nueva por archivo (setsid) no lo reinicia.
     s = Store(fs.root)
     s.set_limit("bot", 2)
     s.save()
@@ -79,5 +81,9 @@ def test_extraction_cap_per_session(fs):
     op(fs, "open", "/files/beto.json", os.O_RDONLY)
     op(fs, "open", "/files/ana.json", os.O_RDONLY)                     # repetir no cuenta
     assert denied(fs, "open", "/files/caro.json", os.O_RDONLY) == errno.EACCES
-    fs._session = lambda: (1001, 2)                                     # otra conversación
-    op(fs, "open", "/files/caro.json", os.O_RDONLY)
+    fs._session = lambda: (1001, 2)                                     # otra sesión, mismo agente
+    assert denied(fs, "open", "/files/caro.json", os.O_RDONLY) == errno.EACCES
+    fs._caller = lambda: (1002, 1002)                                  # OTRO agente: su propia cuota
+    fs._user = lambda: "ana"
+    fs._session = lambda: (1002, 1)
+    op(fs, "open", "/as/ana/files/ana.json", os.O_RDONLY)

@@ -14,6 +14,7 @@ records it and the network proxy reads it, so it lives on disk.
 
 import json
 import os
+import time
 from pathlib import Path
 
 
@@ -31,6 +32,48 @@ def session_of(pid):
             return int(f.read().rsplit(")", 1)[1].split()[3])
     except (OSError, IndexError, ValueError):
         return pid
+
+
+class Quota:
+    """Archivos distintos que un agente (uid) abrió en la hora. Va por uid, no por sesión,
+    así abrir una sesión nueva por archivo (setsid) no reinicia la cuenta — ése era el
+    hueco: el tope de extracción por sesión se saltaba con un `setsid` por lectura.
+
+    Distinct files an agent (uid) opened this hour. Keyed by uid, not session, so spawning
+    a fresh session per read cannot reset it."""
+
+    def __init__(self, meta, clock=time.time):
+        self.path = Path(meta) / "opens.json"
+        self.boot = boot_id()
+        self.clock = clock
+
+    def _key(self, uid):
+        return f"{self.boot}:{uid}:{int(self.clock() // 3600)}"
+
+    def _load(self):
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        hour = int(self.clock() // 3600)
+        return {k: v for k, v in data.items()
+                if k.startswith(self.boot + ":") and int(k.rsplit(":", 1)[1]) >= hour - 1}
+
+    def allow(self, uid, vertex, cap):
+        """(permitido, cuántos van). Cuenta `vertex` si es nuevo esta hora y cabe en el tope."""
+        data = self._load()
+        key = self._key(uid)
+        seen = set(data.get(key, ()))
+        if vertex in seen:
+            return True, len(seen)
+        if len(seen) >= cap:
+            return False, len(seen)
+        seen.add(vertex)
+        data[key] = sorted(seen)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, self.path)
+        return True, len(seen)
 
 
 class Sessions:

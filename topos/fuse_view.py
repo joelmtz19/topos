@@ -40,7 +40,7 @@ try:
 except ImportError:  # Debian empaqueta fusepy con su propio nombre
     from fusepy import FUSE, FuseOSError, Operations, fuse_get_context
 
-from .flow import Sessions, session_of
+from .flow import Quota, Sessions, session_of
 from .i18n import t
 from .store import Store, StoreError
 
@@ -71,6 +71,7 @@ class ToposFS(Operations):
         # Information flow: what each session has read; on disk so it survives remounts
         # and the network proxy can read it.
         self.sessions = Sessions(Path(root) / ".topos")
+        self.quota = Quota(Path(root) / ".topos")   # tope de extracción por agente y hora
         self._acting = None     # a nombre de quién va la operación en curso (/as/<quién>/…)
 
     def _store(self):
@@ -117,9 +118,10 @@ class ToposFS(Operations):
         return sorted(u for u in self._store().sheaf().users if not u.startswith("net/"))
 
     def _record_read(self, vertex):
-        """La sesión que abre `vertex` para leer ya carga su contenido y sus fuentes.
-        Si su usuario tiene tope de archivos por sesión, abrir uno más de la cuenta se niega:
-        una conversación que lee cientos de registros es una extracción, no un uso normal."""
+        """El que abre `vertex` para leer carga su contenido y sus fuentes. Si su usuario
+        tiene tope de archivos, abrir más de la cuenta en la hora se niega: leer cientos de
+        registros es una extracción, no un uso normal. El tope va por agente (uid) y por hora,
+        no por sesión, así que abrir una sesión nueva por archivo no lo reinicia."""
         if vertex is None or self._is_owner():
             return
         s = self._store()
@@ -127,13 +129,13 @@ class ToposFS(Operations):
         user = self._user()
         cap = s.limit(user)
         if cap is not None:
-            opened = self.sessions.opened(uid, sid)
-            if vertex not in opened and len(opened) >= cap:
+            allowed, seen = self.quota.allow(uid, vertex, cap)
+            if not allowed:
                 from . import agent
                 agent.log({"t": time.time(), "agent": user, "via": "fuse", "tool": "read",
                            "args": {"file": vertex}, "status": "denied",
-                           "result": t(f"tope de {cap} archivos por sesión: posible extracción",
-                                       f"cap of {cap} files per session: possible extraction")})
+                           "result": t(f"tope de {cap} archivos/hora ({seen} ya): posible extracción",
+                                       f"cap of {cap} files/hour ({seen} already): possible extraction")})
                 raise FuseOSError(errno.EACCES)
         self.sessions.add(uid, sid, {vertex} | s.sources(vertex), opened=vertex)
 
