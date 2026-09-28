@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# topOS como servicio: mundo, montaje, modelo y planificador.
+# topOS as a service: world, mount, model and scheduler.
+set -eu
+export TOPOS_HOME="$HOME/.mundo" TOPOS_SCHED=/tmp/topos-sched.sock
+L=$(python3 -c 'from topos.i18n import lang; print(lang())')
+tr() { if [ "$L" = es ]; then printf '%s\n' "$1"; else printf '%s\n' "$2"; fi; }
+
+if [ ! -f "$TOPOS_HOME/.topos/state.json" ]; then
+    (cd "$TOPOS_HOME" && topos init >/dev/null && topos-tour >/dev/null)
+    tr "mundo nuevo en $TOPOS_HOME" "new world at $TOPOS_HOME"
+fi
+mkdir -p "$HOME/mundo"
+mountpoint -q "$HOME/mundo" || topos mount "$HOME/mundo" --background --shared
+tr "mundo montado en $HOME/mundo" "world mounted at $HOME/mundo"
+if [ -n "${TOPOS_OLLAMA:-}" ]; then
+    # El modelo se baja en segundo plano para que el planificador no espere.
+    # The model downloads in the background so the scheduler does not wait.
+    python3 - <<'PY' &
+import json, os, urllib.request
+from topos.i18n import t
+url = os.environ["TOPOS_OLLAMA"].rstrip("/")
+model = os.environ.get("TOPOS_MODEL") or os.environ.get("TOPOS_MODELO") or "qwen3:4b"
+have = json.loads(urllib.request.urlopen(f"{url}/api/tags", timeout=30).read())["models"]
+if not any(m["name"] == model for m in have):
+    print(t(f"bajando {model} en {url}…", f"pulling {model} on {url}…"), flush=True)
+    req = urllib.request.Request(f"{url}/api/pull", json.dumps({"name": model, "stream": False}).encode())
+    urllib.request.urlopen(req, timeout=3600).read()
+print(t(f"modelo {model} listo en {url}", f"model {model} ready on {url}"), flush=True)
+PY
+fi
+tr "planificador en $TOPOS_SCHED" "scheduler on $TOPOS_SCHED"
+exec topos sched serve

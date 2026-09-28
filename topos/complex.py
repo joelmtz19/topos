@@ -15,6 +15,7 @@ from itertools import combinations
 from math import comb
 
 from . import gf2
+from .i18n import t
 
 Simplex = tuple
 
@@ -22,7 +23,7 @@ Simplex = tuple
 def simplex(vertices):
     s = tuple(sorted(set(vertices)))
     if not s:
-        raise ValueError("un símplice necesita al menos un vértice")
+        raise ValueError(t("un símplice necesita al menos un vértice", "a simplex needs at least one vertex"))
     return s
 
 

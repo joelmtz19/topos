@@ -1,0 +1,4 @@
+# Two processes take the same two locks in opposite order.
+# The forbidden square has a trapped corner: that is where the deadlock lives.
+proc A: P(disk) P(printer) print V(printer) V(disk)
+proc B: P(printer) P(disk) copy V(disk) V(printer)

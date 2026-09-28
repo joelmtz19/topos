@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 # Siembra un mundo de ejemplo con un hueco, para tener algo que explorar.
+# Seeds an example world with a hole in it, so there is something to explore.
 set -euo pipefail
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-for n in tesis datos figuras notas presupuesto; do echo "contenido de $n" > "$tmp/$n.md"; done
-cp /usr/share/topos/ejemplos/*.txt "$tmp/"
+E=/usr/share/topos/ejemplos
+if [ "$(python3 -c 'from topos.i18n import lang; print(lang())')" = es ]; then
+    set -- tesis datos figuras notas presupuesto investigacion analisis articulo admin programas \
+        "contenido de"
+    progs="cena.txt ordenado.txt semaforo2.txt filosofos.txt"
+else
+    set -- thesis data figures notes budget research analysis paper admin programs "contents of"
+    progs="dining.txt ordered.txt pool2.txt philosophers.txt"
+fi
+for n in "$1" "$2" "$3" "$4" "$5"; do echo "${11} $n" > "$tmp/$n.md"; done
+for p in $progs; do cp "$E/$p" "$tmp/"; done
 topos add "$tmp"/*
-topos glue tesis.md datos.md --as investigacion
-topos glue datos.md figuras.md --as analisis
-topos glue figuras.md tesis.md --as articulo
-topos glue notas.md presupuesto.md --as admin
-topos glue cena.txt ordenado.txt semaforo2.txt filosofos.txt --as programas
+topos glue "$1.md" "$2.md" --as "$6"
+topos glue "$2.md" "$3.md" --as "$7"
+topos glue "$3.md" "$1.md" --as "$8"
+topos glue "$4.md" "$5.md" --as "$9"
+# shellcheck disable=SC2086
+topos glue $progs --as "${10}"

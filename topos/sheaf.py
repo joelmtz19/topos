@@ -22,6 +22,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from .complex import Complex
+from .i18n import t
 
 LETTERS = "rwx"
 
@@ -30,7 +31,7 @@ def expand(spec):
     """'alice:rw' → ['alice:r', 'alice:w']."""
     user, _, letters = spec.partition(":")
     if not user or not letters or set(letters) - set(LETTERS):
-        raise ValueError(f"bit inválido: {spec!r} (usa usuario:rwx)")
+        raise ValueError(t(f"bit inválido: {spec!r} (usa usuario:rwx)", f"invalid bit: {spec!r} (use user:rwx)"))
     return [f"{user}:{c}" for c in letters]
 
 
@@ -39,7 +40,8 @@ def parse_values(specs):
     out = {}
     for spec in specs:
         if spec[:1] not in "+-" or len(spec) < 2:
-            raise ValueError(f"valor inválido: {spec!r} (usa +usuario:rw o -usuario:x)")
+            raise ValueError(t(f"valor inválido: {spec!r} (usa +usuario:rw o -usuario:x)",
+                             f"invalid value: {spec!r} (use +user:rw or -user:x)"))
         for b in expand(spec[1:]):
             out[b] = 1 if spec[0] == "+" else 0
     return out
@@ -53,9 +55,11 @@ class Conflict:
     path: list
 
     def describe(self):
-        return (f"{self.bit}: {self.grant[1]} concede en {self.grant[0]}, "
-                f"{self.deny[1]} niega en {self.deny[0]}; "
-                f"camino {' → '.join(self.path)}")
+        path = " → ".join(self.path)
+        return t(f"{self.bit}: {self.grant[1]} concede en {self.grant[0]}, "
+                 f"{self.deny[1]} niega en {self.deny[0]}; camino {path}",
+                 f"{self.bit}: {self.grant[1]} grants on {self.grant[0]}, "
+                 f"{self.deny[1]} denies on {self.deny[0]}; path {path}")
 
 
 @dataclass

@@ -1,12 +1,15 @@
-# topOS viviendo en Docker: el sistema y su modelo abierto.
+# topOS en Docker: el sistema y su modelo abierto / topOS in Docker: the system and its open model.
 #
-#   docker compose up -d --build        levanta todo (la primera vez baja el modelo)
-#   docker compose exec topos bash -l   entra a topOS
-#   docker compose exec topos topos-demo-agentes
+#   docker compose up -d --build        levanta todo / start everything (first run pulls the model)
+#   docker compose exec topos bash -l   entra a topOS / get a topOS shell
+#   docker compose exec topos topos-demo-agents
 #
 # El mundo, la bitácora y los modelos viven en volúmenes: sobreviven a `down`.
-# Para usar el Ollama de tu máquina en vez del contenedor:
+# The world, the log and the models live in volumes: they survive `down`.
+#
+#   TOPOS_LANG=es docker compose up -d                                   en español
 #   TOPOS_OLLAMA=http://host.docker.internal:11434 docker compose up -d topos
+#                                         usa el Ollama de tu máquina / use your host's Ollama
 
 services:
   ollama:
@@ -34,10 +37,11 @@ services:
     image: topos-os
     hostname: topOS
     restart: unless-stopped
-    command: ["topos-servicio"]
+    command: ["topos-service"]
     environment:
       TOPOS_OLLAMA: ${TOPOS_OLLAMA:-http://ollama:11434}
-      TOPOS_MODELO: ${TOPOS_MODELO:-qwen3:4b}
+      TOPOS_MODEL: ${TOPOS_MODEL:-qwen3:4b}
+      TOPOS_LANG: ${TOPOS_LANG:-}
     devices:
       - /dev/fuse
     cap_add:
@@ -55,6 +59,8 @@ services:
       interval: 10s
       retries: 10
 
+# Los nombres de los volúmenes no cambian: renombrarlos perdería los datos existentes.
+# Volume names stay as they are: renaming them would orphan existing data.
 volumes:
   ollama-modelos:
   topos-mundo:

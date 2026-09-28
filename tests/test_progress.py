@@ -38,3 +38,11 @@ def test_release_without_take_is_rejected():
     import pytest
     with pytest.raises(ValueError):
         ProgressSpace(parse("proc A: V(x)"))
+
+
+def test_english_examples_match_the_spanish_ones():
+    for es, en in (("cena.txt", "dining.txt"), ("ordenado.txt", "ordered.txt"),
+                   ("semaforo2.txt", "pool2.txt")):
+        a, b = space(es), space(en)
+        assert a.analyze()[2] == b.analyze()[2]
+        assert len(a.classes()) == len(b.classes())

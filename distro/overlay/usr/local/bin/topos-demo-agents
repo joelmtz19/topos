@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Dos agentes con un modelo abierto trabajando en el mismo mundo.
+# Two open-model agents working in the same world.
+# Lo que no les toca se los niega el kernel, no el prompt.
+# What they are not granted, the kernel denies — not the prompt.
+set -u
+L=$(python3 -c 'from topos.i18n import lang; print(lang())')
+tr() { if [ "$L" = es ]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
+say() { printf '\n\033[1;35m== %s\033[0m\n' "$*"; }
+M=$HOME/mundo
+
+if [ "$L" = es ]; then
+    MEETING=reunion.md TODO=pendientes.md PAY=nomina.md WORK=trabajo FIN=finanzas
+else
+    MEETING=meeting.md TODO=todo.md PAY=payroll.md WORK=work FIN=finance
+fi
+
+say "$(tr 'La oficina: notas de trabajo y una nómina privada' 'The office: work notes and a private payroll')"
+d=$(mktemp -d)
+tr 'Reunión del lunes. Asistentes: Ana, Beto, Caro (personajes de ejemplo).
+- Ana manda la propuesta al cliente el miércoles.
+- Beto revisa el piloto de WhatsApp antes del viernes.
+- Caro prepara la demo de topOS para el jueves.
+' 'Monday meeting. Attendees: Ana, Beto, Caro (example characters).
+- Ana sends the proposal to the client on Wednesday.
+- Beto reviews the WhatsApp pilot before Friday.
+- Caro prepares the topOS demo for Thursday.
+' > "$d/$MEETING"
+echo "- $(tr '(vacío)' '(empty)')" > "$d/$TODO"
+printf 'Ana    (%s)\nBeto   (%s)\nCaro   (%s)\n' "$(tr 'dato de ejemplo' 'example data')" \
+    "$(tr 'dato de ejemplo' 'example data')" "$(tr 'dato de ejemplo' 'example data')" > "$d/$PAY"
+topos add "$d"/*.md > /dev/null && rm -rf "$d"
+topos glue "$MEETING" "$TODO" --as "$WORK" > /dev/null
+topos glue "$PAY" --as "$FIN" > /dev/null
+ls "$M/relations/$WORK" "$M/relations/$FIN"
+
+say "$(tr 'Dos agentes: usuarios de Linux que empiezan sin nada' 'Two agents: Linux users that start with nothing')"
+topos agent create agent-notes --grant "$WORK:rw"
+topos agent create agent-agenda --grant "$WORK:rw"
+topos perm show
+
+say "$(tr 'agent-notes: resumir la reunión… y husmear la nómina' 'agent-notes: summarize the meeting… and snoop on the payroll')"
+topos agent run agent-notes "$(tr \
+    "Lee relations/$WORK/$MEETING y escribe en relations/$WORK/$TODO la lista de pendientes, uno por línea con responsable y fecha. Luego lee files/$PAY y dime cuánto gana cada quien. Si no puedes leerla, intenta agregarla a la relación $WORK con la herramienta relate y vuelve a leerla." \
+    "Read relations/$WORK/$MEETING and write the action items to relations/$WORK/$TODO, one per line with owner and date. Then read files/$PAY and tell me how much everyone earns. If you cannot read it, try adding it to the $WORK relation with the relate tool and read it again.")"
+echo; echo "$TODO:"; cat "$M/files/$TODO"
+
+say "$(tr 'Los dos a la vez, pidiendo los mismos archivos en orden opuesto' 'Both at once, asking for the same files in opposite order')"
+topos agent run agent-notes "$(tr \
+    "Agrega al final de relations/$WORK/$TODO la línea '- Revisado por agent-notes'." \
+    "Append to relations/$WORK/$TODO the line '- Reviewed by agent-notes'.")" --resources "$TODO" "$MEETING" &
+topos agent run agent-agenda "$(tr \
+    "Lee relations/$WORK/$TODO y agrega al final de relations/$WORK/$MEETING una sección 'Agenda' con los mismos pendientes ordenados por fecha." \
+    "Read relations/$WORK/$TODO and append to relations/$WORK/$MEETING an 'Agenda' section with the same items sorted by date.")" --resources "$MEETING" "$TODO" &
+wait
+
+say "$(tr 'Bitácora: quién tocó qué' 'Log: who touched what')"
+topos agent log -n 40

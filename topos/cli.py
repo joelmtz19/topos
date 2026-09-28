@@ -1,4 +1,15 @@
-"""topos: una capa topológica sobre Linux.
+"""topos: una capa topológica sobre Linux / a topological layer over Linux."""
+
+import argparse
+import sys
+from pathlib import Path
+
+from . import memory, progress
+from .complex import token
+from .i18n import plural, t
+from .store import Store, StoreError
+
+USAGE_ES = """topos: una capa topológica sobre Linux.
 
     topos init                         crea .topos/ aquí
     topos add ARCHIVO... [--name N]    agrega archivos como vértices
@@ -11,25 +22,49 @@
     topos betti [--dim K] | holes [--dim K]
     topos perm govern ETIQ alice:rw    la relación obliga a sus archivos a coincidir
     topos perm set N|@ETIQ +alice:rw -bob:x
+    topos perm enroll USUARIO          lo mete al haz sin darle nada
     topos perm show | check | cohomology
     topos paths PROGRAMA.txt           deadlocks y clases de dihomotopía
     topos run PROGRAMA.txt [--naive] [--runs N]   lo ejecuta con hilos reales
     topos sched serve | status | run NOMBRE PROGRAMA.txt
                                        el planificador para procesos independientes
-    topos agent crear NOMBRE [--concede REL:rw]    un agente: usuario de Linux sin nada
-    topos agent run NOMBRE "TAREA" [--recursos A B]   lo pone a trabajar (modelo en Ollama)
-    topos agent bitacora               quién tocó qué
+    topos agent create NOMBRE [--grant REL:rw]     un agente: usuario de Linux sin nada
+    topos agent run NOMBRE "TAREA" [--resources A B]   lo pone a trabajar (Ollama)
+    topos agent log | eval --models M…
     topos mem [--writable] [--snapshot F] [--dump F]
-    topos mount DIR [--readonly] [--shared]   monta el almacén como sistema de archivos (Linux)
+    topos mount DIR [--readonly] [--shared]   monta el almacén (Linux)
+
+Los comandos tienen alias en español (pegar, huecos, caminos, agente crear…).
+El idioma sale de TOPOS_LANG o del sistema: TOPOS_LANG=en para inglés.
 """
 
-import argparse
-import sys
-from pathlib import Path
+USAGE_EN = """topos: a topological layer over Linux.
 
-from . import memory, progress
-from .complex import token
-from .store import Store, StoreError
+    topos init                         create .topos/ here
+    topos add FILE... [--name N]       add files as vertices
+    topos import DIR                   import a tree: every folder becomes a relation
+    topos ls | cat N | rm N
+    topos glue A B C [--as LABEL]      glue the simplex {A,B,C} into a relation
+    topos cut A B                      remove the simplex {A,B} and its cofaces
+    topos drop LABEL | rels
+    topos star N | link N
+    topos betti [--dim K] | holes [--dim K]
+    topos perm govern LABEL alice:rw   the relation forces its files to agree
+    topos perm set N|@LABEL +alice:rw -bob:x
+    topos perm enroll USER             put a user in the sheaf with nothing granted
+    topos perm show | check | cohomology
+    topos paths PROGRAM.txt            deadlocks and dihomotopy classes
+    topos run PROGRAM.txt [--naive] [--runs N]    run it with real threads
+    topos sched serve | status | run NAME PROGRAM.txt
+                                       the scheduler for independent processes
+    topos agent create NAME [--grant REL:rw]      an agent: a Linux user with nothing
+    topos agent run NAME "TASK" [--resources A B]   put it to work (Ollama)
+    topos agent log | eval --models M…
+    topos mem [--writable] [--snapshot F] [--dump F]
+    topos mount DIR [--readonly] [--shared]   mount the store (Linux)
+
+The language comes from TOPOS_LANG or the system: TOPOS_LANG=es for Spanish.
+"""
 
 
 def main(argv=None):
@@ -45,128 +80,158 @@ def main(argv=None):
 
 
 def parser():
-    p = argparse.ArgumentParser(prog="topos", description=__doc__,
+    p = argparse.ArgumentParser(prog="topos", description=t(USAGE_ES, USAGE_EN),
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = p.add_subparsers(required=True, metavar="COMANDO")
+    sub = p.add_subparsers(required=True, metavar=t("COMANDO", "COMMAND"))
 
-    def cmd(name, fn, help=None):
-        c = sub.add_parser(name, help=help)
+    def cmd(name, fn, help=None, es=None):
+        c = sub.add_parser(name, help=help, aliases=[es] if es else [])
         c.set_defaults(run=fn)
         return c
 
-    cmd("init", cmd_init, "crea un almacén vacío")
-    c = cmd("add", cmd_add, "agrega archivos")
+    cmd("init", cmd_init, t("crea un almacén vacío", "create an empty store"), "iniciar")
+    c = cmd("add", cmd_add, t("agrega archivos", "add files"), "agregar")
     c.add_argument("files", nargs="+")
-    c.add_argument("--name")
-    c = cmd("import", cmd_import, "importa un árbol de carpetas")
+    c.add_argument("--name", "--nombre", dest="name")
+    c = cmd("import", cmd_import, t("importa un árbol de carpetas", "import a folder tree"), "importar")
     c.add_argument("dir")
-    cmd("ls", cmd_ls, "lista vértices")
-    c = cmd("cat", cmd_cat, "muestra un archivo")
+    cmd("ls", cmd_ls, t("lista vértices", "list vertices"))
+    c = cmd("cat", cmd_cat, t("muestra un archivo", "print a file"))
     c.add_argument("name")
-    c = cmd("rm", cmd_rm, "borra un vértice")
+    c = cmd("rm", cmd_rm, t("borra un vértice", "remove a vertex"), "borrar")
     c.add_argument("name")
-    c = cmd("glue", cmd_glue, "pega un símplice")
+    c = cmd("glue", cmd_glue, t("pega un símplice", "glue a simplex"), "pegar")
     c.add_argument("names", nargs="+")
-    c.add_argument("--as", dest="label")
-    c = cmd("cut", cmd_cut, "quita un símplice y sus cocaras")
+    c.add_argument("--as", "--como", dest="label")
+    c = cmd("cut", cmd_cut, t("quita un símplice y sus cocaras", "remove a simplex and its cofaces"),
+            "cortar")
     c.add_argument("names", nargs="+")
-    c = cmd("drop", cmd_drop, "borra una relación")
+    c = cmd("drop", cmd_drop, t("borra una relación", "delete a relation"), "soltar")
     c.add_argument("label")
-    cmd("rels", cmd_rels, "lista relaciones")
-    c = cmd("star", cmd_star, "estrella de un vértice")
+    cmd("rels", cmd_rels, t("lista relaciones", "list relations"), "relaciones")
+    c = cmd("star", cmd_star, t("estrella de un vértice", "star of a vertex"), "estrella")
     c.add_argument("name")
-    c = cmd("link", cmd_link, "enlace de un vértice")
+    c = cmd("link", cmd_link, t("enlace de un vértice", "link of a vertex"), "enlace")
     c.add_argument("name")
-    for name, fn in (("betti", cmd_betti), ("holes", cmd_holes)):
-        c = cmd(name, fn, "números de Betti" if name == "betti" else "ciclos que no son borde")
-        c.add_argument("--dim", type=int, default=1)
+    c = cmd("betti", cmd_betti, t("números de Betti", "Betti numbers"))
+    c.add_argument("--dim", type=int, default=1)
+    c = cmd("holes", cmd_holes, t("ciclos que no son borde", "cycles that are not boundaries"), "huecos")
+    c.add_argument("--dim", type=int, default=1)
 
-    c = cmd("perm", None, "haz de permisos")
-    psub = c.add_subparsers(required=True, metavar="ACCIÓN")
-    g = psub.add_parser("govern", help="la relación gobierna estos bits")
+    c = cmd("perm", None, t("haz de permisos", "permission sheaf"), "permisos")
+    psub = c.add_subparsers(required=True, metavar=t("ACCIÓN", "ACTION"))
+
+    def action(parent, name, fn, help, es=None, **kw):
+        x = parent.add_parser(name, help=help, aliases=[es] if es else [], **kw)
+        x.set_defaults(run=fn)
+        return x
+
+    g = action(psub, "govern", cmd_perm_govern,
+               t("la relación gobierna estos bits", "the relation governs these bits"), "gobernar")
     g.add_argument("label")
     g.add_argument("bits", nargs="+")
-    g.set_defaults(run=cmd_perm_govern)
-    s = psub.add_parser("set", help="fija valores locales", prefix_chars="=")
+    s = action(psub, "set", cmd_perm_set, t("fija valores locales", "set local values"), "fijar",
+               prefix_chars="=")
     s.add_argument("target")
     s.add_argument("values", nargs="+")
-    s.set_defaults(run=cmd_perm_set)
-    e = psub.add_parser("enroll", help="mete a un usuario al haz sin darle nada")
+    e = action(psub, "enroll", cmd_perm_enroll,
+               t("mete a un usuario al haz sin darle nada", "put a user in the sheaf with nothing"),
+               "inscribir")
     e.add_argument("user")
-    e.set_defaults(run=cmd_perm_enroll)
-    psub.add_parser("show", help="tabla de permisos efectivos").set_defaults(run=cmd_perm_show)
-    psub.add_parser("check", help="obstrucciones al pegado").set_defaults(run=cmd_perm_check)
-    psub.add_parser("cohomology", help="dimensiones de H⁰ y H¹").set_defaults(run=cmd_perm_coh)
+    action(psub, "show", cmd_perm_show, t("tabla de permisos efectivos", "effective permission table"),
+           "ver")
+    action(psub, "check", cmd_perm_check, t("obstrucciones al pegado", "gluing obstructions"), "revisar")
+    action(psub, "cohomology", cmd_perm_coh, t("dimensiones de H⁰ y H¹", "dimensions of H⁰ and H¹"),
+           "cohomologia")
 
-    c = cmd("paths", cmd_paths, "procesos como caminos")
+    c = cmd("paths", cmd_paths, t("procesos como caminos", "processes as paths"), "caminos")
     c.add_argument("program")
     c.add_argument("--max-paths", type=int, default=200_000)
-    c = cmd("run", cmd_run, "ejecuta un programa con el planificador topológico")
+    c = cmd("run", cmd_run, t("ejecuta un programa con el planificador topológico",
+                              "run a program under the topological scheduler"), "correr")
     c.add_argument("program")
-    c.add_argument("--naive", action="store_true", help="semáforos reales, sin monitor")
-    c.add_argument("--runs", type=int, default=1, help="repite y cuenta deadlocks")
-    c.add_argument("--jitter", type=float, default=0.02, help="pausa aleatoria máxima por paso (s)")
-    c.add_argument("--seed", type=int)
-    c = cmd("sched", None, "planificador topológico entre procesos")
-    ssub = c.add_subparsers(required=True, metavar="ACCIÓN")
-    for name, fn, help in (("serve", cmd_sched_serve, "arranca el demonio"),
-                           ("status", cmd_sched_status, "quién está dónde"),
-                           ("run", cmd_sched_run, "corre un proceso de un programa")):
-        x = ssub.add_parser(name, help=help)
+    c.add_argument("--naive", "--ingenuo", dest="naive", action="store_true",
+                   help=t("semáforos reales, sin monitor", "real semaphores, no monitor"))
+    c.add_argument("--runs", "--corridas", dest="runs", type=int, default=1,
+                   help=t("repite y cuenta deadlocks", "repeat and count deadlocks"))
+    c.add_argument("--jitter", type=float, default=0.02,
+                   help=t("pausa aleatoria máxima por paso (s)", "max random pause per step (s)"))
+    c.add_argument("--seed", "--semilla", dest="seed", type=int)
+
+    c = cmd("sched", None, t("planificador topológico entre procesos",
+                             "topological scheduler across processes"), "planificador")
+    ssub = c.add_subparsers(required=True, metavar=t("ACCIÓN", "ACTION"))
+    for name, fn, help, es in (
+            ("serve", cmd_sched_serve, t("arranca el demonio", "start the daemon"), "servir"),
+            ("status", cmd_sched_status, t("quién está dónde", "who is where"), "estado"),
+            ("run", cmd_sched_run, t("corre un proceso de un programa", "run one process of a program"),
+             "correr")):
+        x = action(ssub, name, fn, help, es)
         x.add_argument("--socket")
-        x.set_defaults(run=fn)
         if name == "run":
             x.add_argument("name")
             x.add_argument("program")
-    c = cmd("agent", None, "agentes con un modelo abierto, encerrados por el haz")
-    asub = c.add_subparsers(required=True, metavar="ACCIÓN")
-    x = asub.add_parser("crear", help="crea el usuario del agente y lo inscribe en el haz")
+
+    c = cmd("agent", None, t("agentes con un modelo abierto, encerrados por el haz",
+                             "open-model agents, confined by the sheaf"), "agente")
+    asub = c.add_subparsers(required=True, metavar=t("ACCIÓN", "ACTION"))
+    x = action(asub, "create", cmd_agent_create,
+               t("crea el usuario del agente y lo inscribe en el haz",
+                 "create the agent's user and enroll it in the sheaf"), "crear")
     x.add_argument("name")
-    x.add_argument("--concede", nargs="*", default=[], metavar="REL:rwx",
-                   help="relaciones que el agente puede usar")
-    x.set_defaults(run=cmd_agent_create)
-    x = asub.add_parser("run", help="pone al agente a trabajar en una tarea")
+    x.add_argument("--grant", "--concede", dest="grant", nargs="*", default=[], metavar="REL:rwx",
+                   help=t("relaciones que el agente puede usar", "relations the agent may use"))
+    x = action(asub, "run", cmd_agent_run, t("pone al agente a trabajar en una tarea",
+                                             "put the agent to work on a task"), "correr")
     x.add_argument("name")
     x.add_argument("task")
-    x.add_argument("--recursos", nargs="*", default=None,
-                   help="archivos que toma por el planificador; sólo escribe en ellos")
-    x.add_argument("--mundo", help="raíz del mundo montado (por omisión ~/mundo)")
-    x.add_argument("--modelo")
+    x.add_argument("--resources", "--recursos", dest="resources", nargs="*", default=None,
+                   help=t("archivos que toma por el planificador; sólo escribe en ellos",
+                          "files taken through the scheduler; it may only write those"))
+    x.add_argument("--world", "--mundo", dest="world",
+                   help=t("raíz del mundo montado (por omisión ~/mundo)",
+                          "root of the mounted world (default ~/mundo)"))
+    x.add_argument("--model", "--modelo", dest="model")
     x.add_argument("--ollama")
     x.add_argument("--socket")
-    x.set_defaults(run=cmd_agent_run)
-    x = asub.add_parser("evaluar", help="compara modelos con las mismas tareas")
-    x.add_argument("--modelos", nargs="+", required=True)
-    x.add_argument("--repeticiones", type=int, default=3)
+    x = action(asub, "eval", cmd_agent_eval, t("compara modelos con las mismas tareas",
+                                              "compare models on the same tasks"), "evaluar")
+    x.add_argument("--models", "--modelos", dest="models", nargs="+", required=True)
+    x.add_argument("--repeats", "--repeticiones", dest="repeats", type=int, default=3)
     x.add_argument("--ollama")
-    x.set_defaults(run=cmd_agent_eval)
-    x = asub.add_parser("bitacora", help="las últimas acciones de los agentes")
+    x = action(asub, "log", cmd_agent_log, t("las últimas acciones de los agentes",
+                                            "the agents' latest actions"), "bitacora")
     x.add_argument("-n", type=int, default=30)
-    x.set_defaults(run=cmd_agent_log)
-    c = cmd("mem", cmd_mem, "memoria como espacio topológico")
-    c.add_argument("--writable", action="store_true", help="sólo memoria compartida escribible")
-    c.add_argument("--snapshot", help="lee un snapshot JSON en vez de /proc")
-    c.add_argument("--dump", help="guarda el snapshot de /proc en JSON")
-    c = cmd("mount", cmd_mount, "monta la vista FUSE")
+
+    c = cmd("mem", cmd_mem, t("memoria como espacio topológico", "memory as a topological space"),
+            "memoria")
+    c.add_argument("--writable", "--escribible", dest="writable", action="store_true",
+                   help=t("sólo memoria compartida escribible", "only writable shared memory"))
+    c.add_argument("--snapshot", help=t("lee un snapshot JSON en vez de /proc",
+                                        "read a JSON snapshot instead of /proc"))
+    c.add_argument("--dump", help=t("guarda el snapshot de /proc en JSON", "save the /proc snapshot as JSON"))
+    c = cmd("mount", cmd_mount, t("monta la vista FUSE", "mount the FUSE view"), "montar")
     c.add_argument("dir")
-    c.add_argument("--background", action="store_true")
-    c.add_argument("--readonly", action="store_true", help="monta sin escritura")
-    c.add_argument("--shared", action="store_true",
-                   help="deja entrar a otros usuarios; el haz decide por cada uno")
+    c.add_argument("--background", "--fondo", dest="background", action="store_true")
+    c.add_argument("--readonly", "--solo-lectura", dest="readonly", action="store_true",
+                   help=t("monta sin escritura", "mount without writes"))
+    c.add_argument("--shared", "--compartido", dest="shared", action="store_true",
+                   help=t("deja entrar a otros usuarios; el haz decide por cada uno",
+                          "let other users in; the sheaf decides for each one"))
     return p
 
 
-# -- almacén ----------------------------------------------------------------
+# -- almacén / store --------------------------------------------------------
 
 def cmd_init(a):
     s = Store.init()
-    print(f"almacén vacío en {s.meta}")
+    print(t(f"almacén vacío en {s.meta}", f"empty store at {s.meta}"))
 
 
 def cmd_add(a):
     s = Store.find()
     if a.name and len(a.files) > 1:
-        raise StoreError("--name sólo tiene sentido con un archivo")
+        raise StoreError(t("--name sólo tiene sentido con un archivo", "--name only makes sense with one file"))
     for f in a.files:
         print(s.add_file(f, a.name))
     s.save()
@@ -186,7 +251,8 @@ def cmd_import(a):
             label = d.relative_to(root).as_posix().replace("/", "∕") or root.resolve().name
             s.glue(names, label)
     s.save()
-    print(f"{files} archivos; cada carpeta quedó como una relación")
+    print(t(f"{files} archivos; cada carpeta quedó como una relación",
+            f"{files} files; every folder became a relation"))
 
 
 def cmd_ls(a):
@@ -229,7 +295,7 @@ def cmd_rels(a):
     s = Store.find()
     for label, ss in s.relations.items():
         gov = s.state["govern"].get(label)
-        extra = f"  gobierna {' '.join(gov)}" if gov else ""
+        extra = f"  {t('gobierna', 'governs')} {' '.join(gov)}" if gov else ""
         print(f"{label}: {'  '.join(token(x) for x in ss)}{extra}")
 
 
@@ -247,28 +313,35 @@ def cmd_link(a):
         print(token(g))
 
 
+def _space(h):
+    return t("el nervio", "the nerve") if h.space == "nervio" else t("el primal", "the primal complex")
+
+
 def cmd_betti(a):
     h = Store.find().homology(a.dim)
     for k, b in enumerate(h.betti):
         print(f"β{k} = {b}")
-    print(f"χ (hasta dim {a.dim}) = {h.euler}   [calculado en el {h.space}]")
+    print(t(f"χ (hasta dim {a.dim}) = {h.euler}   [calculado en {_space(h)}]",
+            f"χ (up to dim {a.dim}) = {h.euler}   [computed on {_space(h)}]"))
 
 
 def cmd_holes(a):
     s = Store.find()
     h = s.homology(a.dim)
-    names = {0: "componente(s)", 1: "ciclo(s)", 2: "cavidad(es)"}
+    names = {0: t("componente(s)", "component(s)"), 1: t("ciclo(s)", "cycle(s)"),
+             2: t("cavidad(es)", "cavity(ies)")}
     print(f"H0: {h.betti[0]} {names[0]}")
     for i, comp in enumerate(_components(s.complex()), 1):
         print(f"  {i}. {', '.join(sorted(comp))}")
     join = " ∩ ".join if h.space == "nervio" else token
     for k in range(1, a.dim + 1):
         reps = h.cycles.get(k, [])
-        print(f"H{k}: {len(reps)} {names.get(k, 'clases')}")
+        print(f"H{k}: {len(reps)} {names.get(k, t('clases', 'classes'))}")
         for i, cyc in enumerate(reps, 1):
             print(f"  {i}. " + "   ".join(join(x) for x in cyc))
     if h.space == "nervio":
-        print("(los ciclos están expresados en el nervio: sus vértices son relaciones)")
+        print(t("(los ciclos están expresados en el nervio: sus vértices son relaciones)",
+                "(cycles are written on the nerve: its vertices are relations)"))
 
 
 def _components(cx):
@@ -289,7 +362,7 @@ def _components(cx):
     return sorted(groups.values(), key=min)
 
 
-# -- haz --------------------------------------------------------------------
+# -- haz / sheaf ------------------------------------------------------------
 
 def cmd_perm_govern(a):
     s = Store.find()
@@ -307,29 +380,33 @@ def cmd_perm_enroll(a):
     s = Store.find()
     s.enroll(a.user)
     s.save()
-    print(f"{a.user} está en el haz: sólo tendrá lo que se le conceda")
+    print(t(f"{a.user} está en el haz: sólo tendrá lo que se le conceda",
+            f"{a.user} is in the sheaf: it only gets what is granted"))
 
 
 def cmd_perm_show(a):
     s = Store.find()
     r = s.sheaf()
     if not r.users:
-        print("sin permisos declarados")
+        print(t("sin permisos declarados", "no permissions declared"))
         return
     users = r.users
     width = max(len(v) for v in s.vertices)
     print(" " * width + "  " + "  ".join(f"{u:>6}" for u in users))
     for v in s.vertices:
         print(f"{v:<{width}}  " + "  ".join(f"{r.mode(v, u):>6}" for u in users))
-    print("\nletra = concedido   - = negado   · = sin sección (se niega)   ! = conflicto")
+    print("\n" + t("letra = concedido   - = negado   · = sin sección (se niega)   ! = conflicto",
+                   "letter = granted   - = denied   · = no section (denied)   ! = conflict"))
 
 
 def cmd_perm_check(a):
     r = Store.find().sheaf()
     if not r.conflicts:
-        print("los datos locales se pegan en una sección global: sin obstrucciones")
+        print(t("los datos locales se pegan en una sección global: sin obstrucciones",
+                "the local data glue into a global section: no obstructions"))
         return
-    print(f"{len(r.conflicts)} obstrucción(es) en H¹(K_b, A):")
+    print(t(f"{len(r.conflicts)} obstrucción(es) en H¹(K_b, A):",
+            f"{len(r.conflicts)} obstruction(s) in H¹(K_b, A):"))
     for c in r.conflicts:
         print("  " + c.describe())
     return 2
@@ -337,13 +414,15 @@ def cmd_perm_check(a):
 
 def cmd_perm_coh(a):
     r = Store.find().sheaf()
-    print(f"dim H⁰ = {sum(r.h0.values())}   (grados de libertad de una política global)")
-    print(f"dim H¹ = {sum(r.h1.values())}   (lazos de relaciones que gobiernan el mismo bit)")
+    print(t(f"dim H⁰ = {sum(r.h0.values())}   (grados de libertad de una política global)",
+            f"dim H⁰ = {sum(r.h0.values())}   (degrees of freedom of a global policy)"))
+    print(t(f"dim H¹ = {sum(r.h1.values())}   (lazos de relaciones que gobiernan el mismo bit)",
+            f"dim H¹ = {sum(r.h1.values())}   (loops of relations governing the same bit)"))
     for b in r.bits:
         print(f"  {b:<14} H⁰={r.h0[b]}  H¹={r.h1[b]}")
 
 
-# -- procesos y memoria -------------------------------------------------------
+# -- procesos y memoria / processes and memory ------------------------------
 
 def cmd_paths(a):
     from .run import split_commands
@@ -353,31 +432,30 @@ def cmd_paths(a):
     total = 1
     for n in space.lens:
         total *= n + 1
-    print(f"espacio de estados: {total} puntos, {len(reach)} alcanzables, "
-          f"{total - sum(space.allowed(s) for s in _grid(space.lens))} prohibidos")
+    forbidden = total - sum(space.allowed(s) for s in _grid(space.lens))
+    print(t(f"espacio de estados: {total} puntos, {len(reach)} alcanzables, {forbidden} prohibidos",
+            f"state space: {total} points, {len(reach)} reachable, {forbidden} forbidden"))
     if deadlocks:
         print(f"\n{len(deadlocks)} deadlock(s):")
         for d in deadlocks:
             print(f"  {d}: {space.describe_state(d)}")
     unsafe = reach - good
     if unsafe:
-        print(f"zona sin retorno: {_n(len(unsafe), 'estado')} que ya no llega(n) al final")
+        print(t(f"zona sin retorno: {plural(len(unsafe), 'estado', 'state')} que ya no llega(n) al final",
+                f"point of no return: {plural(len(unsafe), 'estado', 'state')} that can no longer finish"))
     if space.final not in reach:
-        print("\nninguna ejecución termina")
+        print("\n" + t("ninguna ejecución termina", "no execution finishes"))
         return 2
     classes = space.classes(a.max_paths)
-    print(f"\n{sum(map(len, classes))} ejecuciones completas en {len(classes)} "
-          "clase(s) de dihomotopía:")
+    print("\n" + t(f"{sum(map(len, classes))} ejecuciones completas en {len(classes)} clase(s) de dihomotopía:",
+                   f"{sum(map(len, classes))} complete executions in {len(classes)} dihomotopy class(es):"))
     for i, cls in enumerate(classes, 1):
         schedule, sems = space.describe_path(cls[0])
-        print(f"  {i}. {_n(len(cls), 'ejecución', 'ejecuciones')}, p. ej. {schedule}")
+        n = plural(len(cls), "ejecución", "execution", "ejecuciones")
+        print(f"  {i}. {n}, {t('p. ej.', 'e.g.')} {schedule}")
         if sems:
             print(f"     {sems}")
     return 2 if deadlocks else 0
-
-
-def _n(k, one, many=None):
-    return f"{k} {one if k == 1 else many or one + 's'}"
 
 
 def _grid(lens):
@@ -394,7 +472,8 @@ def cmd_run(a):
     commands, text = split_commands(Path(a.program).read_text(encoding="utf-8"))
     runner = Runner(progress.parse(text), commands, a.jitter, a.seed)
     space = runner.space
-    mode = "ingenuo (semáforos reales)" if a.naive else "topológico (monitor sobre el espacio)"
+    mode = (t("ingenuo (semáforos reales)", "naive (real semaphores)") if a.naive
+            else t("topológico (monitor sobre el espacio)", "topological (monitor over the space)"))
     if a.runs > 1:
         stuck, waits, orders = 0, 0, {}
         for _ in range(a.runs):
@@ -406,27 +485,32 @@ def cmd_run(a):
             if r.finished:
                 order = space.describe_path(r.path)[1]
                 orders[order] = orders.get(order, 0) + 1
-        print(f"{mode}: {a.runs} corridas, {_n(stuck, 'deadlock')}"
-              + (f", {waits} esperas impuestas por el monitor" if not a.naive else ""))
+        extra = "" if a.naive else t(f", {waits} esperas impuestas por el monitor",
+                                     f", {waits} waits imposed by the monitor")
+        print(t(f"{mode}: {a.runs} corridas, {plural(stuck, 'deadlock', 'deadlock')}{extra}",
+                f"{mode}: {a.runs} runs, {plural(stuck, 'deadlock', 'deadlock')}{extra}"))
         for order, n in sorted(orders.items(), key=lambda x: -x[1]):
-            print(f"  {n:>4}  {order or '(sin semáforos)'}")
+            print(f"  {n:>4}  {order or t('(sin semáforos)', '(no semaphores)')}")
         return 2 if stuck else 0
     r = runner.run(a.naive)
     for name, word, out in r.output:
         if out:
             print(f"[{name} {word}] {out}")
     if not r.finished:
-        print(f"{mode}: {r.error or 'no terminó'}")
-        print(f"  atorado en {r.state}: {space.describe_state(r.state)}")
+        print(f"{mode}: {r.error or t('no terminó', 'did not finish')}")
+        print(t(f"  atorado en {r.state}: {space.describe_state(r.state)}",
+                f"  stuck at {r.state}: {space.describe_state(r.state)}"))
         return 2
     schedule, order = space.describe_path(r.path)
-    print(f"{mode}: terminó en {len(r.path)} pasos")
-    print(f"  orden: {schedule}")
+    print(t(f"{mode}: terminó en {len(r.path)} pasos", f"{mode}: finished in {len(r.path)} steps"))
+    print(f"  {t('orden', 'order')}: {schedule}")
     if order:
-        print(f"  semáforos: {order}")
+        print(f"  {t('semáforos', 'semaphores')}: {order}")
     if r.waits:
-        print(f"  el monitor hizo esperar {_n(r.waits, 'vez', 'veces')} "
-              "para no entrar a la zona sin retorno")
+        print(t(f"  el monitor hizo esperar {plural(r.waits, 'vez', 'time', 'veces')} "
+                "para no entrar a la zona sin retorno",
+                f"  the monitor made threads wait {plural(r.waits, 'vez', 'time', 'veces')} "
+                "to stay out of the point of no return"))
     return 0
 
 
@@ -438,7 +522,8 @@ def _socket(a):
 def cmd_sched_serve(a):
     from .sched import serve
     path = _socket(a)
-    print(f"planificador topológico escuchando en {path}", flush=True)
+    print(t(f"planificador topológico escuchando en {path}", f"topological scheduler listening on {path}"),
+          flush=True)
     serve(path)
 
 
@@ -448,10 +533,11 @@ def cmd_sched_status(a):
     st = c.call(op="status")
     c.close()
     if not st["procs"]:
-        print("nadie conectado")
+        print(t("nadie conectado", "nobody connected"))
         return
     for p in st["procs"]:
-        print(f"  {p['name']:<10} paso {p['pos']}/{p['len']}  siguiente: {p['next']}")
+        print(t(f"  {p['name']:<10} paso {p['pos']}/{p['len']}  siguiente: {p['next']}",
+                f"  {p['name']:<10} step {p['pos']}/{p['len']}  next: {p['next']}"))
     print(st["describe"])
 
 
@@ -462,7 +548,8 @@ def cmd_sched_run(a):
     commands, text = split_commands(Path(a.program).read_text(encoding="utf-8"))
     prog = progress.parse(text)
     if a.name not in prog.names:
-        raise ValueError(f"{a.program} no tiene un proceso {a.name!r}")
+        raise ValueError(t(f"{a.program} no tiene un proceso {a.name!r}",
+                           f"{a.program} has no process {a.name!r}"))
     steps = prog.ops[prog.names.index(a.name)]
     c = Client(_socket(a))
     try:
@@ -470,11 +557,12 @@ def cmd_sched_run(a):
                     capacity=prog.capacity)["name"]
         for kind, sem, word in steps:
             r = c.call(op="step")
-            note = "  (esperó: el monitor lo apartó de la zona sin retorno)" if r["waited"] else ""
+            note = t("  (esperó: el monitor lo apartó de la zona sin retorno)",
+                     "  (waited: the monitor kept it out of the point of no return)") if r["waited"] else ""
             print(f"[{me}] {word}{note}", flush=True)
             if kind == "op" and word in commands:
                 if subprocess.run(commands[word], shell=True).returncode:
-                    raise ValueError(f"`{commands[word]}` falló")
+                    raise ValueError(t(f"`{commands[word]}` falló", f"`{commands[word]}` failed"))
     finally:
         c.close()
 
@@ -491,41 +579,42 @@ def cmd_agent_create(a):
                         "--shell", "/usr/sbin/nologin", a.name], check=True)
     s = Store.find()
     s.enroll(a.name)
-    for spec in a.concede:
+    for spec in a.grant:
         rel, _, bits = spec.partition(":")
         s.set_values("@" + rel, [f"+{a.name}:{bits or 'r'}"])
     s.save()
-    granted = ", ".join(a.concede) or "nada"
-    print(f"{a.name}: usuario de Linux, inscrito en el haz; se le concede {granted}")
+    granted = ", ".join(a.grant) or t("nada", "nothing")
+    print(t(f"{a.name}: usuario de Linux, inscrito en el haz; se le concede {granted}",
+            f"{a.name}: Linux user, enrolled in the sheaf; granted {granted}"))
 
 
 def cmd_agent_run(a):
     import os
     from . import agent
-    mundo = os.path.abspath(os.path.expanduser(a.mundo or "~/mundo"))
+    world = os.path.abspath(os.path.expanduser(a.world or "~/mundo"))
     if _whoami() != a.name:
         # El modelo corre como el usuario del agente: lo que el haz le niega, el kernel se lo niega.
-        argv = ["sudo", "-n", "-u", a.name, sys.executable, "-m", "topos", "agent", "run",
-                a.name, a.task, "--mundo", mundo,
-                "--modelo", a.modelo or agent.DEFAULT_MODEL,
+        # The model runs as the agent's user: what the sheaf denies, the kernel denies.
+        argv = ["sudo", "-n", "-u", a.name, "env", f"TOPOS_LANG={t('es', 'en')}",
+                sys.executable, "-m", "topos", "agent", "run", a.name, a.task, "--world", world,
+                "--model", a.model or agent.DEFAULT_MODEL,
                 "--ollama", a.ollama or agent.DEFAULT_OLLAMA or agent.find_ollama()]
         if a.socket or os.environ.get("TOPOS_SCHED"):
             argv += ["--socket", a.socket or os.environ["TOPOS_SCHED"]]
-        if a.recursos is not None:
-            argv += ["--recursos", *a.recursos]
+        if a.resources is not None:
+            argv += ["--resources", *a.resources]
         sys.stdout.flush()
         os.execvp("sudo", argv)
-    llm = agent.Ollama(a.modelo or agent.DEFAULT_MODEL, a.ollama)
-    print(f"[{a.name}] {a.task}   (modelo {llm.model})", flush=True)
-    summary = agent.run(a.name, a.task, mundo, llm, a.recursos, a.socket,
+    llm = agent.Ollama(a.model or agent.DEFAULT_MODEL, a.ollama)
+    print(f"[{a.name}] {a.task}   ({t('modelo', 'model')} {llm.model})", flush=True)
+    summary = agent.run(a.name, a.task, world, llm, a.resources, a.socket,
                         echo=lambda s: print(s, flush=True))
     print(f"[{a.name}] {summary}")
 
 
 def cmd_agent_eval(a):
     from .agent_eval import evaluate, table
-    results = evaluate(a.modelos, a.repeticiones, a.ollama,
-                       echo=lambda s: print(s, flush=True))
+    results = evaluate(a.models, a.repeats, a.ollama, echo=lambda s: print(s, flush=True))
     print()
     print(table(results))
 
@@ -537,16 +626,19 @@ def cmd_agent_log(a):
     try:
         lines = LOG.read_text(encoding="utf-8").splitlines()[-a.n:]
     except FileNotFoundError:
-        print("la bitácora está vacía")
+        print(t("la bitácora está vacía", "the log is empty"))
         return
     for line in lines:
         e = json.loads(line)
         when = time.strftime("%H:%M:%S", time.localtime(e["t"]))
-        mark = {"ok": "✓", "negado": "✗", "error": "!"}.get(e["estado"], "?")
+        status = e.get("status", e.get("estado"))
+        mark = {"ok": "✓", "denied": "✗", "negado": "✗", "error": "!"}.get(status, "?")
         args = e.get("args") or {}
-        what = ", ".join(f"{k}={v}" for k, v in args.items() if k != "contenido")
-        print(f"{when} {mark} {e['agente']:<16} {e['tool']}({what})"
-              + (f"  {e['resultado']}" if e["estado"] != "ok" or e["tool"] == "fin" else ""))
+        what = ", ".join(f"{k}={v}" for k, v in args.items() if k not in ("content", "contenido"))
+        tool = e["tool"]
+        result = e.get("result", e.get("resultado", ""))
+        print(f"{when} {mark} {e.get('agent', e.get('agente')):<16} {tool}({what})"
+              + (f"  {result}" if status != "ok" or tool in ("end", "fin") else ""))
 
 
 def cmd_mem(a):
@@ -554,20 +646,21 @@ def cmd_mem(a):
     snap = memory.load(a.snapshot) if a.snapshot else memory.snapshot()
     if a.dump:
         Path(a.dump).write_text(json.dumps(snap), encoding="utf-8")
-        print(f"snapshot de {len(snap)} procesos en {a.dump}")
+        print(t(f"snapshot de {len(snap)} procesos en {a.dump}", f"snapshot of {len(snap)} processes in {a.dump}"))
         return
     procs, points = memory.build(snap, a.writable)
     classes = memory.kolmogorov(points)
-    print(f"{len(procs)} procesos, {len(points)} puntos de memoria, "
-          f"{len(classes)} tras el cociente T0")
+    print(t(f"{len(procs)} procesos, {len(points)} puntos de memoria, {len(classes)} tras el cociente T0",
+            f"{len(procs)} processes, {len(points)} memory points, {len(classes)} after the T0 quotient"))
     h = memory.nerve(procs, points).homology(1)
-    print(f"nervio: β0 = {h.betti[0]}, β1 = {h.betti[1]}   [calculado en el {h.space}]")
+    print(t(f"nervio: β0 = {h.betti[0]}, β1 = {h.betti[1]}   [calculado en {_space(h)}]",
+            f"nerve: β0 = {h.betti[0]}, β1 = {h.betti[1]}   [computed on {_space(h)}]"))
     if h.space == "primal":
         for i, cyc in enumerate(h.cycles.get(1, []), 1):
-            print(f"  ciclo {i}: " + "  ".join(token(x) for x in cyc))
+            print(f"  {t('ciclo', 'cycle')} {i}: " + "  ".join(token(x) for x in cyc))
     pairs = memory.shared_pairs(points)
     if pairs:
-        print("\npares que comparten más memoria:")
+        print("\n" + t("pares que comparten más memoria:", "pairs sharing the most memory:"))
         for (p, q), n in pairs[:10]:
             print(f"  {n:>5}  {p} ↔ {q}")
 

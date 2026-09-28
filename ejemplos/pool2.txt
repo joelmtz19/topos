@@ -1,0 +1,6 @@
+# A semaphore of capacity 2 with three processes: the forbidden hole is the
+# cube where all three are inside at once.
+sem pool 2
+proc A: P(pool) use V(pool)
+proc B: P(pool) use V(pool)
+proc C: P(pool) use V(pool)

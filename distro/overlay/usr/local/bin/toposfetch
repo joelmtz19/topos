@@ -1,12 +1,16 @@
 #!/usr/bin/python3
-"""toposfetch: el sistema y tu mundo de un vistazo.
+"""toposfetch: el sistema y tu mundo de un vistazo / your system and world at a glance.
 
 El dibujo es un complejo de verdad: tres triángulos rellenos alrededor de uno
 vacío. Su homología es β₀ = 1, β₁ = 1: el hueco del centro.
+The logo is a real complex: three filled triangles around an empty one, so
+β₀ = 1, β₁ = 1 — the hole in the middle.
 """
 
 import os
 import platform
+
+from topos.i18n import t
 
 C, M, D, B, R = "\033[1;36m", "\033[38;5;141m", "\033[2m", "\033[1m", "\033[0m"
 
@@ -36,7 +40,7 @@ def os_name():
         if line.startswith("PRETTY_NAME="):
             name = line.split("=", 1)[1].strip('"')
             debian = read("/etc/debian_version")
-            return f"{name} (sobre Debian {debian})" if debian else name
+            return t(f"{name} (sobre Debian {debian})", f"{name} (on Debian {debian})") if debian else name
     return platform.system()
 
 
@@ -60,15 +64,20 @@ def world():
         from topos.store import Store
         s = Store.find()
     except Exception:
-        return ["sin mundo (corre `topos init`)"], []
+        return [t("sin mundo (corre `topos init`)", "no world (run `topos init`)")], []
     h = s.homology(1)
     sheaf = s.sheaf()
     obst = len(sheaf.conflicts)
-    lines = [f"{len(s.vertices)} archivos, {len(s.relations)} relaciones",
+    lines = [t(f"{len(s.vertices)} archivos, {len(s.relations)} relaciones",
+               f"{len(s.vertices)} files, {len(s.relations)} relations"),
              f"β = ({', '.join(map(str, h.betti))})   χ = {h.euler}"]
-    extra = ["sin obstrucciones" if not obst else f"{obst} obstrucción(es) en H¹"
-             if sheaf.bits else "sin permisos declarados"]
-    return lines, extra
+    if not sheaf.users:
+        extra = t("sin permisos declarados", "no permissions declared")
+    elif obst:
+        extra = t(f"{obst} obstrucción(es) en H¹", f"{obst} obstruction(s) in H¹")
+    else:
+        extra = t("sin obstrucciones", "no obstructions")
+    return lines, [extra]
 
 
 def sched():
@@ -77,9 +86,13 @@ def sched():
         c = Client(DEFAULT_SOCKET)
         n = len(c.call(op="status")["procs"])
         c.close()
-        return f"activo, {n} proceso(s) coordinados"
+        return t(f"activo, {n} proceso(s) coordinados", f"running, {n} process(es) coordinated")
     except Exception:
-        return "apagado (topos sched serve)"
+        return t("apagado (topos sched serve)", "off (topos sched serve)")
+
+
+def label(es, en):
+    return f"{M}{t(es, en):<10}{R}"
 
 
 def main():
@@ -90,23 +103,24 @@ def main():
     info = [
         f"{B}{C}{user}{R}{B}@topOS{R}",
         f"{D}{'─' * 30}{R}",
-        f"{M}Sistema{R}   {os_name()}",
-        f"{M}Kernel{R}    {platform.release()}",
-        f"{M}Encendido{R} {uptime()}",
-        f"{M}Memoria{R}   {memory()}",
-        f"{M}Mundo{R}     {mw[0]}",
-        *(f"          {x}" for x in mw[1:]),
-        f"{M}Haz{R}       {perm[0] if perm else '—'}",
-        f"{M}Montaje{R}   {'~/mundo' if os.path.ismount(mount) else 'sin montar'}",
-        f"{M}Planif.{R}   {sched()}",
+        f"{label('Sistema', 'System')}{os_name()}",
+        f"{label('Kernel', 'Kernel')}{platform.release()}",
+        f"{label('Encendido', 'Uptime')}{uptime()}",
+        f"{label('Memoria', 'Memory')}{memory()}",
+        f"{label('Mundo', 'World')}{mw[0]}",
+        *(f"{' ' * 10}{x}" for x in mw[1:]),
+        f"{label('Haz', 'Sheaf')}{perm[0] if perm else '—'}",
+        f"{label('Montaje', 'Mount')}{'~/mundo' if os.path.ismount(mount) else t('sin montar', 'not mounted')}",
+        f"{label('Planif.', 'Scheduler')}{sched()}",
     ]
     rows = max(len(ART), len(info))
     print()
     for i in range(rows):
         left = ART[i] if i < len(ART) else " " * 17
         print(f"  {left}  {info[i] if i < len(info) else ''}")
-    print(f"\n  {D}prueba:{R} cd ~/mundo · cat holes · topos run "
-          f"/usr/share/topos/ejemplos/filosofos.txt · topos --help\n")
+    example = t("filosofos.txt", "philosophers.txt")
+    print(f"\n  {D}{t('prueba', 'try')}:{R} cd ~/mundo · cat holes · topos run "
+          f"/usr/share/topos/ejemplos/{example} · topos --help\n")
 
 
 if __name__ == "__main__":

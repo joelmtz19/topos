@@ -1,4 +1,4 @@
-# topOS: el mundo topológico de cada usuario. Se carga desde ~/.bashrc.
+# topOS: el mundo topológico de cada usuario / every user's topological world. Loaded from ~/.bashrc.
 case $- in *i*) ;; *) return 0 ;; esac
 
 export TOPOS_HOME="$HOME/.mundo"
@@ -28,7 +28,7 @@ __topos_betti() {
 PROMPT_COMMAND="__topos_betti${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
 PS1='\[\e[38;5;141m\]β(${__TOPOS_B})\[\e[0m\] \[\e[1;36m\]\u@topOS\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
 
-alias mundo='cd ~/mundo'
+alias mundo='cd ~/mundo' world='cd ~/mundo'
 if [ -z "${TOPOS_HELLO:-}" ]; then
     export TOPOS_HELLO=1
     toposfetch

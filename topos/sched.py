@@ -24,6 +24,7 @@ import socketserver
 import threading
 
 from .progress import OP, Program, ProgressSpace
+from .i18n import t
 
 DEFAULT_SOCKET = os.environ.get("TOPOS_SCHED", "/tmp/topos-sched.sock")
 MAX_POINTS = 2_000_000
@@ -57,7 +58,8 @@ class Scheduler:
         for i in self.order:
             points *= len(self.procs[i]["steps"]) + 1
         if points > MAX_POINTS:
-            raise ValueError(f"el espacio de progreso tendría {points} puntos; demasiados")
+            raise ValueError(t(f"el espacio de progreso tendría {points} puntos; demasiados",
+                                 f"the progress space would have {points} points; too many"))
         program = Program(self.capacity, [self.procs[i]["name"] for i in self.order],
                           [self.procs[i]["steps"] for i in self.order])
         self.space = ProgressSpace(program)
@@ -89,7 +91,7 @@ class Scheduler:
         with self.cond:
             p = self.procs[pid]
             if p["pos"] >= len(p["steps"]):
-                raise ValueError("ese proceso ya terminó su plan")
+                raise ValueError(t("ese proceso ya terminó su plan", "that process already finished its plan"))
             waited = False
             while True:
                 i = self.order.index(pid)
@@ -114,7 +116,7 @@ class Scheduler:
             for i in self.order:
                 p = self.procs[i]
                 k = p["pos"]
-                nxt = p["steps"][k][2] if k < len(p["steps"]) else "(terminó)"
+                nxt = p["steps"][k][2] if k < len(p["steps"]) else t("(terminó)", "(finished)")
                 procs.append({"id": i, "name": p["name"], "pos": k,
                               "len": len(p["steps"]), "next": nxt})
             state = self._state()

@@ -18,6 +18,7 @@ import re
 from collections import Counter, deque
 from dataclasses import dataclass
 from itertools import islice
+from .i18n import t
 
 OP = re.compile(r"^(P|V)\(([\w.-]+)\)$")
 
@@ -47,9 +48,9 @@ def parse(text):
             names.append(name.strip())
             ops.append(steps)
         else:
-            raise ValueError(f"línea {n}: no entiendo {raw.strip()!r}")
+            raise ValueError(t(f"línea {n}: no entiendo {raw.strip()!r}", f"line {n}: cannot parse {raw.strip()!r}"))
     if not names:
-        raise ValueError("el programa no tiene procesos")
+        raise ValueError(t("el programa no tiene procesos", "the program has no processes"))
     return Program(capacity, names, ops)
 
 
@@ -71,7 +72,7 @@ class ProgressSpace:
                     held[sem] += 1
                 elif kind == "V":
                     if not held[sem]:
-                        raise ValueError(f"{name} suelta {sem} sin haberlo tomado")
+                        raise ValueError(t(f"{name} suelta {sem} sin haberlo tomado", f"{name} releases {sem} without taking it"))
                     held[sem] -= 1
                 table.append(+held)
             self.hold.append(table)
@@ -137,7 +138,8 @@ class ProgressSpace:
         """Clases de dihomotopía: lista de listas de caminos."""
         paths = list(islice(self.paths(), max_paths + 1))
         if len(paths) > max_paths:
-            raise TooManyPaths(f"más de {max_paths} ejecuciones; sube --max-paths")
+            raise TooManyPaths(t(f"más de {max_paths} ejecuciones; sube --max-paths",
+                                  f"more than {max_paths} executions; raise --max-paths"))
         parent = {p: p for p in paths}
 
         def find(p):
@@ -166,11 +168,12 @@ class ProgressSpace:
         parts = []
         for i, k in enumerate(s):
             name = self.p.names[i]
-            held = ", ".join(sorted(self.hold[i][k])) or "nada"
+            held = ", ".join(sorted(self.hold[i][k])) or t("nada", "nothing")
             if k < self.lens[i]:
-                parts.append(f"{name} tiene {held} y espera {self.p.ops[i][k][2]}")
+                parts.append(t(f"{name} tiene {held} y espera {self.p.ops[i][k][2]}",
+                                f"{name} holds {held} and waits for {self.p.ops[i][k][2]}"))
             else:
-                parts.append(f"{name} terminó")
+                parts.append(t(f"{name} terminó", f"{name} finished"))
         return "; ".join(parts)
 
     def describe_path(self, path):

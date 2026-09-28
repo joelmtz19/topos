@@ -5,17 +5,21 @@
 #   export  sólo el ISO, para `docker build --output`
 
 FROM debian:bookworm-slim AS base
-ENV DEBIAN_FRONTEND=noninteractive LANG=es_MX.UTF-8
+# Inglés por omisión; TOPOS_LANG=es (o LANG=es_MX.UTF-8) lo pasa a español.
+# English by default; TOPOS_LANG=es (or LANG=es_MX.UTF-8) switches to Spanish.
+ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-fusepy fuse libfuse2 sudo bash-completion less nano vim-tiny \
         procps psmisc iproute2 kmod locales ca-certificates \
  && sed -i 's/^# *\(es_MX.UTF-8\)/\1/; s/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen && locale-gen \
- && echo 'LANG=es_MX.UTF-8' > /etc/default/locale \
+ && echo 'LANG=C.UTF-8' > /etc/default/locale \
  && rm -rf /var/lib/apt/lists/*
 COPY topos /usr/lib/python3/dist-packages/topos
 COPY ejemplos /usr/share/topos/ejemplos
 COPY distro/overlay/ /
 RUN chmod 755 /usr/local/bin/* \
+ && ln -s topos-demo-agents /usr/local/bin/topos-demo-agentes \
+ && ln -s topos-service /usr/local/bin/topos-servicio \
  && echo '[ -f /etc/topos/bashrc ] && . /etc/topos/bashrc' | tee -a /etc/skel/.bashrc >> /root/.bashrc \
  && useradd -m -s /bin/bash -G sudo topos \
  && echo 'topos:topos' | chpasswd && echo 'root:topos' | chpasswd \

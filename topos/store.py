@@ -18,6 +18,7 @@ from pathlib import Path
 
 from . import sheaf
 from .complex import Complex, simplex, token
+from .i18n import t
 
 META = ".topos"
 FORBIDDEN = set("/+@\\")
@@ -39,7 +40,7 @@ class Store:
     def init(cls, root="."):
         meta = Path(root) / META
         if meta.exists():
-            raise StoreError(f"ya hay un almacén en {meta}")
+            raise StoreError(t(f"ya hay un almacén en {meta}", f"there is already a store at {meta}"))
         (meta / "objects").mkdir(parents=True)
         empty = {"vertices": {}, "relations": {}, "govern": {}, "values": {}, "mtimes": {}}
         (meta / "state.json").write_text(json.dumps(empty, indent=2), encoding="utf-8")
@@ -54,7 +55,7 @@ class Store:
         for d in (here, *here.parents):
             if (d / META / "state.json").exists():
                 return cls(d)
-        raise StoreError("no hay almacén aquí; corre `topos init`")
+        raise StoreError(t("no hay almacén aquí; corre `topos init`", "no store here; run `topos init`"))
 
     def save(self):
         tmp = self.meta / "state.json.tmp"
@@ -69,7 +70,8 @@ class Store:
 
     def add_bytes(self, name, data):
         if not name or FORBIDDEN & set(name):
-            raise StoreError(f"nombre inválido {name!r}: no uses / + @ \\")
+            raise StoreError(t(f"nombre inválido {name!r}: no uses / + @ \\",
+                                f"invalid name {name!r}: do not use / + @ \\"))
         digest = hashlib.sha256(data).hexdigest()
         obj = self.meta / "objects" / digest
         if not obj.exists():
@@ -99,7 +101,8 @@ class Store:
         if new == old:
             return
         if not new or FORBIDDEN & set(new):
-            raise StoreError(f"nombre inválido {new!r}: no uses / + @ \\")
+            raise StoreError(t(f"nombre inválido {new!r}: no uses / + @ \\",
+                                f"invalid name {new!r}: do not use / + @ \\"))
         if new in self.state["vertices"]:
             self.remove_vertex(new)
         self.state["vertices"][new] = self.state["vertices"].pop(old)
@@ -121,7 +124,7 @@ class Store:
     def _need(self, *names):
         missing = [n for n in names if n not in self.state["vertices"]]
         if missing:
-            raise StoreError(f"no existe: {', '.join(missing)}")
+            raise StoreError(t("no existe: ", "does not exist: ") + ", ".join(missing))
 
     # -- relaciones --------------------------------------------------------
 
@@ -140,7 +143,7 @@ class Store:
                 n += 1
             label = f"r{n}"
         if FORBIDDEN & set(label):
-            raise StoreError(f"etiqueta inválida {label!r}")
+            raise StoreError(t(f"etiqueta inválida {label!r}", f"invalid label {label!r}"))
         cx = Complex(rels.get(label, []))
         cx.add(s)
         rels[label] = [list(g) for g in cx.generators]
@@ -166,18 +169,18 @@ class Store:
     def create_relation(self, label):
         """Una relación vacía, como una carpeta recién hecha."""
         if not label or FORBIDDEN & set(label):
-            raise StoreError(f"etiqueta inválida {label!r}")
+            raise StoreError(t(f"etiqueta inválida {label!r}", f"invalid label {label!r}"))
         if label in self.state["relations"]:
-            raise StoreError(f"ya existe la relación {label!r}")
+            raise StoreError(t(f"ya existe la relación {label!r}", f"relation {label!r} already exists"))
         self.state["relations"][label] = []
 
     def rename_relation(self, old, new):
         if old not in self.state["relations"]:
-            raise StoreError(f"no existe la relación {old!r}")
+            raise StoreError(t(f"no existe la relación {old!r}", f"no relation {old!r}"))
         if not new or FORBIDDEN & set(new):
-            raise StoreError(f"etiqueta inválida {new!r}")
+            raise StoreError(t(f"etiqueta inválida {new!r}", f"invalid label {new!r}"))
         if new in self.state["relations"]:
-            raise StoreError(f"ya existe la relación {new!r}")
+            raise StoreError(t(f"ya existe la relación {new!r}", f"relation {new!r} already exists"))
         rels = self.state["relations"]
         rels[new] = rels.pop(old)
         if old in self.state["govern"]:
@@ -188,14 +191,14 @@ class Store:
     def unglue(self, label, name):
         """Saca un vértice de una sola relación; el resto del complejo no se toca."""
         if label not in self.state["relations"]:
-            raise StoreError(f"no existe la relación {label!r}")
+            raise StoreError(t(f"no existe la relación {label!r}", f"no relation {label!r}"))
         cx = Complex(self.state["relations"][label])
         cx.remove((name,))
         self.state["relations"][label] = [list(g) for g in cx.generators]
 
     def drop(self, label):
         if label not in self.state["relations"]:
-            raise StoreError(f"no existe la relación {label!r}")
+            raise StoreError(t(f"no existe la relación {label!r}", f"no relation {label!r}"))
         self._drop_relation(label)
 
     def _drop_relation(self, label):
@@ -223,7 +226,7 @@ class Store:
 
     def govern(self, label, specs):
         if label not in self.state["relations"]:
-            raise StoreError(f"no existe la relación {label!r}")
+            raise StoreError(t(f"no existe la relación {label!r}", f"no relation {label!r}"))
         bits = set(self.state["govern"].get(label, []))
         for spec in specs:
             bits.update(sheaf.expand(spec))
@@ -232,7 +235,7 @@ class Store:
     def set_values(self, target, specs):
         if target.startswith("@"):
             if target[1:] not in self.state["relations"]:
-                raise StoreError(f"no existe la relación {target[1:]!r}")
+                raise StoreError(t(f"no existe la relación {target[1:]!r}", f"no relation {target[1:]!r}"))
         else:
             self._need(target)
         current = self.state["values"].setdefault(target, {})
@@ -246,6 +249,6 @@ class Store:
     def enroll(self, user):
         """Mete a un usuario al haz sin darle nada: lo que no se le conceda, se le niega."""
         if not user or ":" in user or FORBIDDEN & set(user):
-            raise StoreError(f"usuario inválido {user!r}")
+            raise StoreError(t(f"usuario inválido {user!r}", f"invalid user {user!r}"))
         if user not in self.state["enrolled"]:
             self.state["enrolled"].append(user)

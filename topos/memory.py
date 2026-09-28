@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 
 from .complex import Complex
+from .i18n import t
 
 MAPS = re.compile(r"^([0-9a-f]+)-([0-9a-f]+)\s+(\S{4})\s+([0-9a-f]+)\s+(\S+)\s+(\d+)\s*(.*)$")
 
@@ -29,7 +30,8 @@ def snapshot(proc="/proc"):
     """{pid: {'name': comm, 'maps': [líneas]}} de todos los procesos legibles."""
     root = Path(proc)
     if not (root / "self" / "maps").exists():
-        raise OSError(f"{proc} no tiene mapas de memoria; esto necesita Linux (usa Docker)")
+        raise OSError(t(f"{proc} no tiene mapas de memoria; esto necesita Linux (usa Docker)",
+                        f"{proc} has no memory maps; this needs Linux (use Docker)"))
     out = {}
     for d in root.iterdir():
         if not d.name.isdigit():

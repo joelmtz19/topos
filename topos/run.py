@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass, field
 
 from .progress import ProgressSpace
+from .i18n import t
 
 
 @dataclass
@@ -62,8 +63,9 @@ class Runner:
         if kind == "op" and word in self.commands:
             r = subprocess.run(self.commands[word], shell=True, capture_output=True, text=True)
             if r.returncode:
-                raise RuntimeError(f"{self.p.names[i]}: `{self.commands[word]}` "
-                                   f"salió con {r.returncode}: {r.stderr.strip()}")
+                cmd, err = self.commands[word], r.stderr.strip()
+                raise RuntimeError(t(f"{self.p.names[i]}: `{cmd}` salió con {r.returncode}: {err}",
+                                     f"{self.p.names[i]}: `{cmd}` exited with {r.returncode}: {err}"))
             out.append((self.p.names[i], word, r.stdout.rstrip()))
 
     def _pause(self, lock):
@@ -84,7 +86,8 @@ class Runner:
 
         if self.space.origin not in self.good:
             res.state = self.space.origin
-            res.error = "ninguna ejecución termina: no hay camino que planificar"
+            res.error = t("ninguna ejecución termina: no hay camino que planificar",
+                          "no execution finishes: there is no path to schedule")
             return res
 
         def proc(i):

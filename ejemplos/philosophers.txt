@@ -1,0 +1,9 @@
+# Three philosophers, three forks, each takes the left fork first.
+# With naive semaphores they get stuck when all three hold their first fork;
+# the topological scheduler lets them eat without changing anyone's order.
+proc Ana:   P(f1) P(f2) eat_ana   V(f2) V(f1)
+proc Beto:  P(f2) P(f3) eat_beto  V(f3) V(f2)
+proc Caro:  P(f3) P(f1) eat_caro  V(f1) V(f3)
+do eat_ana:  echo "Ana eats with f1 and f2"
+do eat_beto: echo "Beto eats with f2 and f3"
+do eat_caro: echo "Caro eats with f3 and f1"

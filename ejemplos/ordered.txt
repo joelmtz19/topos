@@ -1,0 +1,4 @@
+# Same work, but both take the locks in the same order.
+# No deadlock; two execution classes remain: A goes first or B goes first.
+proc A: P(disk) P(printer) print V(printer) V(disk)
+proc B: P(disk) P(printer) copy V(printer) V(disk)
