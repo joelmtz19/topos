@@ -22,6 +22,7 @@ from .i18n import t
 
 META = ".topos"
 FORBIDDEN = set("/+@\\")
+TOMBSTONE = "/"   # prefijo de fuentes borradas: "/" nunca puede estar en un nombre
 
 
 class StoreError(Exception):
@@ -35,6 +36,9 @@ class Store:
         self.state = json.loads((self.meta / "state.json").read_text(encoding="utf-8"))
         self.state.setdefault("mtimes", {})   # almacenes viejos no las tenían
         self.state.setdefault("enrolled", [])
+        # Flujo de información: vértice → vértices cuyo contenido llegó hasta él.
+        # Information flow: vertex → vertices whose content flowed into it.
+        self.state.setdefault("labels", {})
 
     @classmethod
     def init(cls, root="."):
@@ -94,6 +98,12 @@ class Store:
         del self.state["vertices"][name]
         self.state["values"].pop(name, None)
         self.state["mtimes"].pop(name, None)
+        self.state["labels"].pop(name, None)
+        # Una fuente borrada no libera a lo que salió de ella: queda como lápida, un
+        # nombre que ningún vértice puede tener, y quien la cite sigue negado.
+        # A deleted source does not release what came from it: it becomes a tombstone,
+        # a name no vertex can have, so anything citing it stays denied.
+        self._rename_source(name, TOMBSTONE + name)
 
     def rename_vertex(self, old, new):
         """Renombra un vértice sin tocar su contenido, sus relaciones ni su haz."""
@@ -113,6 +123,32 @@ class Store:
                 list(simplex(new if v == old else v for v in s)) for s in ss]
         if old in self.state["values"]:
             self.state["values"][new] = self.state["values"].pop(old)
+        if old in self.state["labels"]:
+            self.state["labels"][new] = self.state["labels"].pop(old)
+        self._rename_source(old, new)
+
+    # -- flujo de información / information flow --------------------------
+
+    def sources(self, name):
+        """Los vértices cuyo contenido llegó a `name` (puede incluir lápidas)."""
+        return set(self.state["labels"].get(name, ()))
+
+    def taint(self, name, sources):
+        """Marca que el contenido de `sources` llegó a `name`. Sólo crece."""
+        self._need(name)
+        new = set(sources) - {name}
+        if new:
+            self.state["labels"][name] = sorted(self.sources(name) | new)
+
+    def declassify(self, name):
+        """Quita las marcas de `name`. Sólo el dueño del mundo debe poder hacerlo."""
+        self._need(name)
+        self.state["labels"].pop(name, None)
+
+    def _rename_source(self, old, new):
+        for v, srcs in self.state["labels"].items():
+            if old in srcs:
+                self.state["labels"][v] = sorted({new if s == old else s for s in srcs} - {v})
 
     def mtime(self, name, default=0.0):
         return self.state["mtimes"].get(name, default)

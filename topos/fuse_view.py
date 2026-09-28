@@ -49,8 +49,12 @@ class ToposFS(Operations):
     def __init__(self, root):
         self.root = root
         self.t = time.time()
-        self.handles = {}   # fh → [vértice, bytearray, sucio]
+        self.handles = {}   # fh → [vértice, bytearray, sucio, sesión | None]
         self.next_fh = 1
+        # Flujo de información: lo que cada sesión ha leído (sesión = uid + sesión de Linux,
+        # así `cat secreto > publico` desde la misma terminal también cuenta).
+        # Information flow: what each session has read (uid + Linux session id).
+        self.contexts = {}
 
     def _store(self):
         # Se relee en cada llamada para que los cambios del CLI se vean al instante.
@@ -59,6 +63,25 @@ class ToposFS(Operations):
     def _caller(self):
         uid, gid, _ = fuse_get_context()
         return uid, gid
+
+    def _session(self):
+        uid, _, pid = fuse_get_context()
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                sid = int(f.read().rsplit(")", 1)[1].split()[3])
+        except (OSError, IndexError, ValueError):
+            sid = pid
+        return uid, sid
+
+    def _is_owner(self):
+        return self._caller()[0] in (0, os.getuid())
+
+    def _record_read(self, vertex):
+        """La sesión que abre `vertex` para leer ya carga su contenido y sus fuentes."""
+        if vertex is None or self._is_owner():
+            return
+        ctx = self.contexts.setdefault(self._session(), set())
+        ctx |= {vertex} | self._store().sources(vertex)
 
     def _user(self):
         uid = self._caller()[0]
@@ -170,7 +193,7 @@ class ToposFS(Operations):
 
     def _content(self, s, vertex):
         # Lo que alguien está escribiendo se ve antes de cerrar, como en ext4.
-        for v, buf, dirty in self.handles.values():
+        for v, buf, dirty, _ in self.handles.values():
             if v == vertex and dirty:
                 return bytes(buf)
         return s.cat(vertex)
@@ -190,11 +213,19 @@ class ToposFS(Operations):
         if vertex is None:
             return 0o444
         user = self._user()
-        r = self._store().sheaf()
+        s = self._store()
+        r = s.sheaf()
         if user not in r.users:
             return 0o666
         bits = r.mode(vertex, user)
-        return sum(m for c, m in zip(bits, (0o400, 0o200, 0o100)) if c in "rwx")
+        mode = sum(m for c, m in zip(bits, (0o400, 0o200, 0o100)) if c in "rwx")
+        # Leer algo exige poder leer todo lo que fluyó hasta ahí: si la nómina llegó a un
+        # resumen, quien no lee la nómina tampoco lee el resumen. Una lápida niega siempre.
+        # Reading requires being able to read everything that flowed into it.
+        if mode & 0o400 and any(src not in s.state["vertices"] or r.mode(src, user)[0] != "r"
+                                for src in s.sources(vertex)):
+            mode &= ~0o400
+        return mode
 
     def _require(self, vertex, bit):
         if not self._mode(vertex) & bit:
@@ -256,7 +287,8 @@ class ToposFS(Operations):
     def _open_handle(self, vertex, data, dirty=False):
         fh = self.next_fh
         self.next_fh += 1
-        self.handles[fh] = [vertex, bytearray(data), dirty]
+        session = None if self._is_owner() else self._session()
+        self.handles[fh] = [vertex, bytearray(data), dirty, session]
         return fh
 
     def open(self, path, flags):
@@ -266,11 +298,13 @@ class ToposFS(Operations):
         if not flags & WRITE:
             if node[1] is not None:
                 self._require(node[1], 0o400)
+                self._record_read(node[1])
             return 0
         vertex = self._vertex(path)
         self._require(vertex, 0o200)
         if flags & os.O_RDWR:
             self._require(vertex, 0o400)
+            self._record_read(vertex)
         data = b"" if flags & os.O_TRUNC else node[2]
         return self._open_handle(vertex, data, dirty=bool(flags & os.O_TRUNC))
 
@@ -316,7 +350,8 @@ class ToposFS(Operations):
             vertex = self._vertex(path)
             self._require(vertex, 0o200)
             s = self._store()
-            h = [vertex, bytearray(self._content(s, vertex)), True]
+            h = [vertex, bytearray(self._content(s, vertex)), True,
+                 None if self._is_owner() else self._session()]
         h[1][length:] = b""
         h[1].extend(b"\0" * (length - len(h[1])))
         h[2] = True
@@ -324,12 +359,16 @@ class ToposFS(Operations):
             self._flush(h)
 
     def _flush(self, h):
-        vertex, buf, dirty = h
+        vertex, buf, dirty, session = h
         if not dirty:
             return
         s = self._store()
         if vertex in s.state["vertices"]:
             s.add_bytes(vertex, bytes(buf))
+            # Lo que esta sesión leyó llega al archivo que escribe: las marcas viajan.
+            # What this session read flows into what it writes: labels travel.
+            if session is not None and self.contexts.get(session):
+                s.taint(vertex, self.contexts[session])
             self._commit(s)
         h[2] = False
 
@@ -415,6 +454,7 @@ class ToposFS(Operations):
                     if name in s.state["vertices"]:
                         self._require(name, 0o200)
                         s.add_bytes(name, s.cat(vertex))
+                        s.taint(name, s.sources(vertex))   # el guardado atómico no lava marcas
                         s.remove_vertex(vertex)
                     else:
                         s.rename_vertex(vertex, name)

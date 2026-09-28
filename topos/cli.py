@@ -24,6 +24,7 @@ USAGE_ES = """topos: una capa topológica sobre Linux.
     topos perm set N|@ETIQ +alice:rw -bob:x
     topos perm enroll USUARIO          lo mete al haz sin darle nada
     topos perm show | check | cohomology
+    topos flow show | declassify N     qué datos llegaron a qué archivos
     topos paths PROGRAMA.txt           deadlocks y clases de dihomotopía
     topos run PROGRAMA.txt [--naive] [--runs N]   lo ejecuta con hilos reales
     topos sched serve | status | run NOMBRE PROGRAMA.txt
@@ -54,6 +55,7 @@ USAGE_EN = """topos: a topological layer over Linux.
     topos perm set N|@LABEL +alice:rw -bob:x
     topos perm enroll USER             put a user in the sheaf with nothing granted
     topos perm show | check | cohomology
+    topos flow show | declassify N     which data reached which files
     topos paths PROGRAM.txt            deadlocks and dihomotopy classes
     topos run PROGRAM.txt [--naive] [--runs N]    run it with real threads
     topos sched serve | status | run NAME PROGRAM.txt
@@ -145,6 +147,16 @@ def parser():
     action(psub, "check", cmd_perm_check, t("obstrucciones al pegado", "gluing obstructions"), "revisar")
     action(psub, "cohomology", cmd_perm_coh, t("dimensiones de H⁰ y H¹", "dimensions of H⁰ and H¹"),
            "cohomologia")
+
+    c = cmd("flow", None, t("flujo de información: qué datos llegaron a qué archivos",
+                            "information flow: which data reached which files"), "flujo")
+    fsub = c.add_subparsers(required=True, metavar=t("ACCIÓN", "ACTION"))
+    action(fsub, "show", cmd_flow_show, t("archivos marcados, sus fuentes y quién los lee",
+                                          "marked files, their sources and who can read them"), "ver")
+    x = action(fsub, "declassify", cmd_flow_declassify,
+               t("quita las marcas de un archivo (sólo el dueño)", "clear a file's marks (owner only)"),
+               "desclasificar")
+    x.add_argument("name")
 
     c = cmd("paths", cmd_paths, t("procesos como caminos", "processes as paths"), "caminos")
     c.add_argument("program")
@@ -431,6 +443,38 @@ def cmd_perm_coh(a):
             f"dim H¹ = {sum(r.h1.values())}   (loops of relations governing the same bit)"))
     for b in r.bits:
         print(f"  {b:<14} H⁰={r.h0[b]}  H¹={r.h1[b]}")
+
+
+# -- flujo de información / information flow --------------------------------
+
+def cmd_flow_show(a):
+    from .store import TOMBSTONE
+    s = Store.find()
+    marked = {v: s.sources(v) for v in s.vertices if s.sources(v)}
+    if not marked:
+        print(t("ningún archivo está marcado: no ha fluido nada restringido",
+                "no file is marked: nothing restricted has flowed"))
+        return
+    r = s.sheaf()
+    for v, srcs in marked.items():
+        shown = ", ".join(t(f"{x[1:]} (borrado)", f"{x[1:]} (deleted)") if x.startswith(TOMBSTONE) else x
+                          for x in sorted(srcs))
+        print(f"{v} ← {shown}")
+        if r.users:
+            readers = [u for u in r.users
+                       if r.mode(v, u)[0] == "r"
+                       and all(x in s.state["vertices"] and r.mode(x, u)[0] == "r" for x in srcs)]
+            print(t(f"    lo pueden leer: {', '.join(readers) or 'nadie del haz'}",
+                    f"    readable by: {', '.join(readers) or 'nobody in the sheaf'}"))
+
+
+def cmd_flow_declassify(a):
+    s = Store.find()
+    before = s.sources(a.name)
+    s.declassify(a.name)
+    s.save()
+    print(t(f"{a.name}: sin marcas (antes: {', '.join(sorted(before)) or 'ninguna'})",
+            f"{a.name}: no marks (before: {', '.join(sorted(before)) or 'none'})"))
 
 
 # -- procesos y memoria / processes and memory ------------------------------

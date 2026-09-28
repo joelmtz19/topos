@@ -21,6 +21,7 @@ def fs(tmp_path, monkeypatch):
     f = ToposFS(str(tmp_path))
     monkeypatch.setattr(f, "_user", lambda: "alice")
     monkeypatch.setattr(f, "_caller", lambda: (1000, 1000))
+    monkeypatch.setattr(f, "_session", lambda: (1000, 1))
     return f
 
 
