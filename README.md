@@ -55,6 +55,21 @@ UEFI, autologin, en vivo) y un tar para `wsl --import`. Detalles en
     topos mem [--writable]
     topos mount DIR [--readonly] [--shared]
 
+## Qué modelo abierto usar
+
+`topos agent evaluar --modelos …` corre las mismas tareas con cada modelo y las califica con
+reglas fijas. Medido el 28-sep-2026 en una RTX 3050 de 6 GB, 3 repeticiones:
+
+| modelo | extraer pendientes | anexar sin borrar | admitir lo negado | total | s/tarea |
+|---|---|---|---|---|---|
+| qwen3:4b | 3/3 | 3/3 | 2/3 | **8/9** | 83 |
+| qwen3:1.7b | 0/3 | 3/3 | 1/3 | 4/9 | 11 |
+| llama3.2:3b | 0/3 | 3/3 | 1/3 | 4/9 | 22 |
+| hermes3:8b | 1/3 | 2/3 | 0/3 | 3/9 | 124 |
+
+El tamaño no decide: el modelo de 8B quedó último y nunca admitió que se le negó un archivo.
+Los tiempos incluyen la GPU compartida entre modelos cargados.
+
 ## Pruebas
 
     pip install -e '.[test]' && pytest              # en Windows corren las que no necesitan Linux
