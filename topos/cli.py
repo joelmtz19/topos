@@ -31,6 +31,7 @@ USAGE_ES = """topos: una capa topológica sobre Linux.
     topos agent create NOMBRE [--grant REL:rw]     un agente: usuario de Linux sin nada
     topos agent run NOMBRE "TAREA" [--resources A B]   lo pone a trabajar (Ollama)
     topos agent log | eval --models M…
+    topos mcp [--world DIR] [--read-only]  servidor MCP para cualquier agente
     topos mem [--writable] [--snapshot F] [--dump F]
     topos mount DIR [--readonly] [--shared]   monta el almacén (Linux)
 
@@ -60,6 +61,7 @@ USAGE_EN = """topos: a topological layer over Linux.
     topos agent create NAME [--grant REL:rw]      an agent: a Linux user with nothing
     topos agent run NAME "TASK" [--resources A B]   put it to work (Ollama)
     topos agent log | eval --models M…
+    topos mcp [--world DIR] [--read-only]  MCP server for any agent
     topos mem [--writable] [--snapshot F] [--dump F]
     topos mount DIR [--readonly] [--shared]   mount the store (Linux)
 
@@ -203,6 +205,15 @@ def parser():
                                             "the agents' latest actions"), "bitacora")
     x.add_argument("-n", type=int, default=30)
 
+    c = cmd("mcp", cmd_mcp, t("servidor MCP: cualquier agente trabaja dentro del mundo",
+                              "MCP server: any agent works inside the world"))
+    c.add_argument("--world", "--mundo", dest="world",
+                   help=t("raíz del mundo montado (por omisión ~/mundo)",
+                          "root of the mounted world (default ~/mundo)"))
+    c.add_argument("--read-only", "--solo-lectura", dest="readonly", action="store_true",
+                   help=t("sin herramientas de escritura", "no writing tools"))
+    c.add_argument("--resources", "--recursos", dest="resources", nargs="*", default=None,
+                   help=t("sólo puede escribir estos archivos", "may only write these files"))
     c = cmd("mem", cmd_mem, t("memoria como espacio topológico", "memory as a topological space"),
             "memoria")
     c.add_argument("--writable", "--escribible", dest="writable", action="store_true",
@@ -639,6 +650,13 @@ def cmd_agent_log(a):
         result = e.get("result", e.get("resultado", ""))
         print(f"{when} {mark} {e.get('agent', e.get('agente')):<16} {tool}({what})"
               + (f"  {result}" if status != "ok" or tool in ("end", "fin") else ""))
+
+
+def cmd_mcp(a):
+    import os
+    from .mcp import serve
+    world = os.path.abspath(os.path.expanduser(a.world or "~/mundo"))
+    serve(world, readonly=a.readonly, resources=a.resources)
 
 
 def cmd_mem(a):
