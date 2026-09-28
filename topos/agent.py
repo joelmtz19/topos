@@ -92,6 +92,32 @@ def normalize_args(name, args):
     return out
 
 
+def calls_from_text(text):
+    """Llamadas que el modelo escribió como JSON en el texto en vez de como tool_calls.
+
+    Varios modelos chicos (phi4-mini, por ejemplo) saben qué herramienta usar pero la
+    escriben en un bloque ```json … ``` que Ollama no reconoce como llamada.
+    """
+    names = {n for n, _, _ in TOOLS}
+    calls, dec, i = [], json.JSONDecoder(), 0
+    while (i := text.find("{", i)) != -1:
+        try:
+            obj, end = dec.raw_decode(text, i)
+        except json.JSONDecodeError:
+            i += 1
+            continue
+        i = end
+        for o in obj if isinstance(obj, list) else [obj]:
+            if not isinstance(o, dict):
+                continue
+            f = o.get("function") if isinstance(o.get("function"), dict) else o
+            name = f.get("name")
+            args = f.get("arguments", f.get("parameters", {}))
+            if name in names and isinstance(args, (dict, str)):
+                calls.append({"function": {"name": name, "arguments": args}})
+    return calls
+
+
 def strip_thinking(text):
     import re
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.S).strip()
@@ -239,7 +265,9 @@ def run(name, task, root, llm, resources=None, sched_socket=None, echo=print, wo
             msg = llm.chat(messages, tool_specs())
             msg["content"] = strip_thinking(msg.get("content"))
             messages.append(msg)
-            calls = msg.get("tool_calls") or []
+            calls = msg.get("tool_calls") or calls_from_text(msg["content"])
+            if calls and not msg.get("tool_calls"):
+                msg["tool_calls"] = calls
             if not calls:
                 # Un modelo chico a veces se pone a pensar en voz alta en vez de actuar.
                 if nudges < 2:

@@ -86,3 +86,11 @@ def test_a_model_that_rambles_is_nudged_back_to_tools(mundo):
             return super().chat(messages, tools)
     llm = Rambler([("terminar", {"resumen": "hecho"})])
     assert agent.run("agente-x", "haz algo", mundo, llm, echo=lambda s: None) == "hecho"
+
+
+def test_tool_calls_written_as_text_are_recovered():
+    text = 'Uso la herramienta:\n```json\n{"type": "function", "function": {"name": "leer", ' \
+           '"parameters": {"ruta": "files/a.md"}}}\n```\ny {"name": "no_existe", "arguments": {}}'
+    assert agent.calls_from_text(text) == \
+        [{"function": {"name": "leer", "arguments": {"ruta": "files/a.md"}}}]
+    assert agent.calls_from_text("sin llamadas {roto") == []

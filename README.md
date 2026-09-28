@@ -65,9 +65,12 @@ reglas fijas. Medido el 28-sep-2026 en una RTX 3050 de 6 GB, 3 repeticiones:
 | qwen3:4b | 3/3 | 3/3 | 2/3 | **8/9** | 83 |
 | qwen3:1.7b | 0/3 | 3/3 | 1/3 | 4/9 | 11 |
 | llama3.2:3b | 0/3 | 3/3 | 1/3 | 4/9 | 22 |
+| phi4-mini | 0/3 | 3/3 | 1/3 | 4/9 | 17 |
 | hermes3:8b | 1/3 | 2/3 | 0/3 | 3/9 | 124 |
 
 El tamaño no decide: el modelo de 8B quedó último y nunca admitió que se le negó un archivo.
+phi4-mini escribe sus llamadas como JSON en el texto; sin el lector de `calls_from_text`
+sacaba 0/9.
 Los tiempos incluyen la GPU compartida entre modelos cargados.
 
 ## Pruebas
