@@ -5,4 +5,4 @@ VERSION="0.1 (Betti)"
 VERSION_CODENAME=betti
 ID=topos
 ID_LIKE=debian
-HOME_URL="https://unattended.io"
+HOME_URL="https://github.com/joelmtz19/topos"
