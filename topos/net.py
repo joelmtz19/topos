@@ -19,6 +19,7 @@ may the data this session has read go there (the host is the reader net/<host>).
 """
 
 import errno
+import json
 import os
 import select
 import socket
@@ -60,6 +61,87 @@ def decide(store, user, read, host):
             return False, t(f"esta sesión leyó {shown} y {host} no puede recibirlo",
                             f"this session read {shown} and {host} may not receive it")
     return True, t("permitido", "allowed")
+
+
+# -- presupuestos / budgets ----------------------------------------------------
+
+def size(n):
+    """1234 → '1.2 KB'; 5_000_000 → '5.00 MB'."""
+    return f"{n / 1e6:.2f} MB" if n >= 100_000 else f"{n / 1e3:.1f} KB"
+
+
+class Ledger:
+    """Consumo por (usuario, host del presupuesto, hora): peticiones y bytes.
+
+    El tráfico a los modelos va cifrado, así que no se cuentan tokens sino bytes
+    (≈ 4 por token): alcanza para que un chatbot abusado no funda la cuenta.
+    Usage per (user, budget host, hour): requests and bytes, since model traffic
+    is encrypted and tokens cannot be counted directly (≈ 4 bytes per token).
+    """
+
+    def __init__(self, meta, clock=time.time):
+        import threading
+        self.path = Path(meta) / "usage.json"
+        self.clock = clock
+        self.lock = threading.Lock()
+        try:
+            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.data = {}
+
+    def _hour(self):
+        return int(self.clock() // 3600)
+
+    @staticmethod
+    def rule(store, user, host):
+        for pattern, limits in store.net.get("budgets", {}).get(user, {}).items():
+            if host_matches(host, pattern):
+                return pattern, limits
+        return None, None
+
+    def open(self, store, user, host):
+        """(permitido, motivo, llave). Cuenta la petición si cabe en el presupuesto."""
+        pattern, limits = self.rule(store, user, host)
+        if pattern is None:
+            return True, "", None
+        key = f"{user}|{pattern}|{self._hour()}"
+        with self.lock:
+            used = self.data.setdefault(key, {"requests": 0, "bytes": 0, "limits": limits})
+            used["limits"] = limits
+            if limits.get("requests") is not None and used["requests"] >= limits["requests"]:
+                return False, t(f"{user} ya hizo {used['requests']} peticiones a {pattern} esta hora "
+                                f"(tope {limits['requests']})",
+                                f"{user} already made {used['requests']} requests to {pattern} this hour "
+                                f"(limit {limits['requests']})"), key
+            if limits.get("bytes") is not None and used["bytes"] >= limits["bytes"]:
+                used_s, cap_s = size(used["bytes"]), size(limits["bytes"])
+                return False, t(f"{user} ya usó {used_s} con {pattern} esta hora (tope {cap_s})",
+                                f"{user} already used {used_s} with {pattern} this hour (limit {cap_s})"), key
+            used["requests"] += 1
+            self._save()
+        return True, "", key
+
+    def add(self, key, n):
+        """Suma bytes; False si con eso se pasó del tope (hay que cortar)."""
+        if key is None:
+            return True
+        with self.lock:
+            used = self.data[key]
+            used["bytes"] += n
+            cap = used["limits"].get("bytes")
+            return cap is None or used["bytes"] <= cap
+
+    def close(self, key):
+        if key is not None:
+            with self.lock:
+                self._save()
+
+    def _save(self):
+        keep = self._hour() - 24          # un día de historia basta para `net usage`
+        self.data = {k: v for k, v in self.data.items() if int(k.rsplit("|", 1)[1]) >= keep}
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.data), encoding="utf-8")
+        os.replace(tmp, self.path)
 
 
 # -- quién llama / who is calling ---------------------------------------------
@@ -147,25 +229,40 @@ class Handler(socketserver.StreamRequestHandler):
         sessions = Sessions(store.meta)
         read = sessions.get(uid, sid) if sid is not None else sessions.of_user(uid)
         ok, why = decide(store, user, read, host)
+        args = {"host": host, "port": port}
+        if sid is None:
+            # Sin /proc/PID/fd (falta SYS_PTRACE) no se sabe la sesión: se toma el peor caso.
+            args["session"] = t("desconocida: peor caso", "unknown: worst case")
         agent.log({"t": time.time(), "agent": user, "via": "net", "tool": "connect",
-                   "args": {"host": host, "port": port}, "status": "ok" if ok else "denied",
-                   "result": why})
+                   "args": args, "status": "ok" if ok else "denied", "result": why})
         if not ok:
             return self._reply(403, why)
+        ok, why, key = srv.ledger.open(store, user, host)
+        if not ok:
+            agent.log({"t": time.time(), "agent": user, "via": "net", "tool": "budget",
+                       "args": {"host": host}, "status": "denied", "result": why})
+            return self._reply(429, why)
         try:
             upstream = socket.create_connection((host, port), timeout=15)
         except OSError as e:
             return self._reply(502, str(e))
-        with upstream:
-            if method.upper() == "CONNECT":
-                self._reply(200, "Connection established", close=False)
-            else:
-                # Petición HTTP normal: se reenvía en forma de origen y sin keep-alive.
-                lines = [f"{method} /{path} {version}"]
-                lines += [h for h in head[1:] if not h.lower().startswith(("proxy-", "connection:"))]
-                lines.append("Connection: close")
-                upstream.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1"))
-            self._relay(upstream)
+        try:
+            with upstream:
+                if method.upper() == "CONNECT":
+                    self._reply(200, "Connection established", close=False)
+                else:
+                    # Petición HTTP normal: se reenvía en forma de origen y sin keep-alive.
+                    lines = [f"{method} /{path} {version}"]
+                    lines += [h for h in head[1:] if not h.lower().startswith(("proxy-", "connection:"))]
+                    lines.append("Connection: close")
+                    upstream.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1"))
+                if not self._relay(upstream, lambda n: srv.ledger.add(key, n)):
+                    agent.log({"t": time.time(), "agent": user, "via": "net", "tool": "budget",
+                               "args": {"host": host}, "status": "denied",
+                               "result": t("presupuesto agotado a media conexión: se cortó",
+                                           "budget exhausted mid-connection: cut off")})
+        finally:
+            srv.ledger.close(key)
 
     def _read_head(self):
         lines = []
@@ -187,16 +284,19 @@ class Handler(socketserver.StreamRequestHandler):
         self.wfile.write((head + "\r\n").encode() + body)
         self.wfile.flush()
 
-    def _relay(self, upstream):
+    def _relay(self, upstream, count=lambda n: True):
+        """Reenvía en los dos sentidos. False si `count` dijo que se acabó el presupuesto."""
         socks = [self.connection, upstream]
         while True:
             ready, _, _ = select.select(socks, [], [], 60)
             if not ready:
-                return
+                return True
             for s in ready:
                 data = s.recv(65536)
                 if not data:
-                    return
+                    return True
+                if not count(len(data)):
+                    return False
                 (upstream if s is self.connection else self.connection).sendall(data)
 
 
@@ -208,6 +308,7 @@ class Proxy(socketserver.ThreadingMixIn, socketserver.TCPServer):
         super().__init__((host, port), Handler)
         self.root = root
         self.identify = identify
+        self.ledger = Ledger(Path(root) / ".topos")
 
 
 def serve(root, port=DEFAULT_PORT):

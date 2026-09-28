@@ -47,8 +47,9 @@ services:
     devices:
       - /dev/fuse
     cap_add:
-      - SYS_ADMIN
-      - NET_ADMIN
+      - SYS_ADMIN     # FUSE
+      - NET_ADMIN     # el candado de red / the network lock (nftables)
+      - SYS_PTRACE    # el proxy ve la sesión de cada conexión / the proxy sees each connection's session
     security_opt:
       - apparmor:unconfined
     volumes:

@@ -306,6 +306,15 @@ class Store:
         allowed = set(self.net["allow"].get(user, [])) - {h.lower() for h in hosts}
         self.net["allow"][user] = sorted(allowed)
 
+    def net_budget(self, user, host, requests=None, mb=None):
+        """Tope por hora de peticiones y megabytes de `user` hacia `host` (acepta `*.dominio`)."""
+        _check_host(host)
+        if requests is None and mb is None:
+            self.net.setdefault("budgets", {}).get(user, {}).pop(host.lower(), None)
+            return
+        limits = {"requests": requests, "bytes": int(mb * 1_000_000) if mb is not None else None}
+        self.net.setdefault("budgets", {}).setdefault(user, {})[host.lower()] = limits
+
     def net_trust(self, host):
         """Un destino de confianza puede recibir cualquier dato (p. ej. el modelo local)."""
         _check_host(host)

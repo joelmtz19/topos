@@ -76,3 +76,40 @@ def test_ruleset_locks_agents_to_the_proxy():
     rules = net.ruleset({1001, 1002}, 3128)
     assert "meta skuid { 1001, 1002 } ip daddr 127.0.0.1 tcp dport 3128 accept" in rules
     assert "meta skuid { 1001, 1002 } counter reject" in rules
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1_000_000.0
+
+    def __call__(self):
+        return self.now
+
+
+def test_budget_counts_requests_and_bytes_per_hour(s, tmp_path):
+    s.net_budget("agent", "*.github.com", requests=2, mb=0.001)     # 2 peticiones, 1000 bytes
+    clock = Clock()
+    ledger = net.Ledger(s.meta, clock)
+    ok, _, key = ledger.open(s, "agent", "api.github.com")
+    assert ok and ledger.add(key, 600)
+    ok, _, key = ledger.open(s, "agent", "api.github.com")
+    assert ok and not ledger.add(key, 600)                            # 1200 > 1000: se corta
+    ok, why, _ = ledger.open(s, "agent", "api.github.com")
+    assert not ok and "api.github.com" not in why and "*.github.com" in why
+    clock.now += 3600                                                 # la hora siguiente, de nuevo
+    assert ledger.open(s, "agent", "api.github.com")[0]
+
+
+def test_hosts_without_budget_are_not_counted(s):
+    ledger = net.Ledger(s.meta, Clock())
+    ok, _, key = ledger.open(s, "agent", "docs.example")
+    assert ok and key is None and ledger.add(key, 10**9)
+
+
+def test_usage_survives_a_proxy_restart(s):
+    s.net_budget("agent", "docs.example", requests=1)
+    clock = Clock()
+    ledger = net.Ledger(s.meta, clock)
+    ok, _, key = ledger.open(s, "agent", "docs.example")
+    ledger.close(key)
+    assert not net.Ledger(s.meta, clock).open(s, "agent", "docs.example")[0]

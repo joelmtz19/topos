@@ -176,6 +176,14 @@ def parser():
     x = action(nsub, "trust", cmd_net_trust, t("destino de confianza: recibe cualquier dato",
                                               "trusted destination: may receive any data"), "confiar")
     x.add_argument("host")
+    x = action(nsub, "budget", cmd_net_budget, t("tope por hora de peticiones y MB hacia un host",
+                                                "hourly cap on requests and MB to a host"), "presupuesto")
+    x.add_argument("user")
+    x.add_argument("host")
+    x.add_argument("--requests", "--peticiones", dest="requests", type=int)
+    x.add_argument("--mb", type=float)
+    action(nsub, "usage", cmd_net_usage, t("consumo de esta hora contra su tope",
+                                          "this hour's usage against its cap"), "consumo")
     action(nsub, "show", cmd_net_show, t("la política de red", "the network policy"), "ver")
     x = action(nsub, "check", cmd_net_check, t("¿puede este agente mandar lo que leyó a este host?",
                                               "may this agent send what it read to this host?"), "probar")
@@ -531,6 +539,40 @@ def cmd_net_trust(a):
             f"{a.host} is trusted: it may receive any data"))
 
 
+def cmd_net_budget(a):
+    s = Store.find()
+    s.net_budget(a.user, a.host, a.requests, a.mb)
+    s.save()
+    if a.requests is None and a.mb is None:
+        print(t(f"{a.user} → {a.host}: sin tope", f"{a.user} → {a.host}: no cap"))
+        return
+    parts = ([t(f"{a.requests} peticiones", f"{a.requests} requests")] if a.requests is not None else []) \
+        + ([f"{a.mb:g} MB"] if a.mb is not None else [])
+    print(t(f"{a.user} → {a.host}: tope por hora de {' y '.join(parts)}",
+            f"{a.user} → {a.host}: hourly cap of {' and '.join(parts)}"))
+
+
+def cmd_net_usage(a):
+    import json
+    import time
+    from .net import size
+    s = Store.find()
+    try:
+        data = json.loads((s.meta / "usage.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    hour = int(time.time() // 3600)
+    rows = [(k.split("|"), v) for k, v in sorted(data.items()) if k.endswith(f"|{hour}")]
+    if not rows:
+        print(t("sin consumo con tope esta hora", "no capped usage this hour"))
+    for (user, host, _), v in rows:
+        lim = v.get("limits", {})
+        req = f"{v['requests']}/{lim['requests']}" if lim.get("requests") is not None else str(v["requests"])
+        mb = f"{size(v['bytes'])} / {size(lim['bytes'])}" if lim.get("bytes") is not None \
+            else size(v["bytes"])
+        print(t(f"{user} → {host}: {req} peticiones, {mb}", f"{user} → {host}: {req} requests, {mb}"))
+
+
 def cmd_net_show(a):
     s = Store.find()
     net = s.net
@@ -774,6 +816,7 @@ def cmd_agent_run(a):
             argv += ["--resources", *a.resources]
         sys.stdout.flush()
         os.execvp("sudo", argv)
+    _own_session()
     llm = agent.Ollama(a.model or agent.DEFAULT_MODEL, a.ollama)
     print(f"[{a.name}] {a.task}   ({t('modelo', 'model')} {llm.model})", flush=True)
     summary = agent.run(a.name, a.task, world, llm, a.resources, a.socket,
@@ -813,8 +856,21 @@ def cmd_agent_log(a):
 def cmd_mcp(a):
     import os
     from .mcp import serve
+    _own_session()
     world = os.path.abspath(os.path.expanduser(a.world or "~/mundo"))
     serve(world, readonly=a.readonly, resources=a.resources)
+
+
+def _own_session():
+    """Cada tarea del agente y cada servidor MCP es su propia sesión de Linux, así lo
+    que leyó una tarea no marca a la siguiente (sudo hereda la sesión de quien lo lanza).
+    Each agent task / MCP server gets its own Linux session, so what one task read
+    does not mark the next one."""
+    import os
+    try:
+        os.setsid()
+    except (AttributeError, OSError):
+        pass            # ya es líder de sesión, o Windows
 
 
 def cmd_mem(a):
