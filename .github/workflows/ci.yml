@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    # La suite completa + los ataques del red team, dentro del contenedor con FUSE.
+    # Full suite + the red-team attacks, inside the container with FUSE.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t topos .
+      - name: Test suite
+        run: docker run --rm topos python -m pytest -q
+      - name: Build the topOS image
+        run: docker build -f distro/Dockerfile --target base -t topos-os .
+      - name: Red-team corpus (no regressions)
+        run: |
+          docker run --rm --device /dev/fuse --cap-add SYS_ADMIN \
+            --security-opt apparmor:unconfined -e TOPOS_LANG=en \
+            -v "$PWD/distro/redteam.sh:/tmp/redteam.sh:ro" \
+            topos-os bash -lic 'bash /tmp/redteam.sh'
+      - name: Tamper-evident audit log
+        run: |
+          docker run --rm --device /dev/fuse --cap-add SYS_ADMIN \
+            --security-opt apparmor:unconfined -e TOPOS_LANG=en \
+            -v "$PWD/distro/audit-check.sh:/tmp/audit-check.sh:ro" \
+            topos-os bash -lic 'bash /tmp/audit-check.sh'
+
+  windows:
+    # Lo que no necesita Linux (Windows salta FUSE/sockets Unix por diseño).
+    # What does not need Linux (Windows skips FUSE/Unix sockets by design).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[test]"
+      - run: python -m pytest -q

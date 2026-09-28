@@ -5,8 +5,27 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "topos"
 version = "0.1.0"
-description = "Una capa topológica sobre Linux: archivos en complejos simpliciales, permisos como haz, procesos como caminos"
+description = "A topological security layer for AI agents on Linux: files as simplicial complexes, permissions as a sheaf, processes as paths"
+readme = "README.md"
 requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Joel Martínez" }]
+keywords = ["ai-agents", "security", "sandbox", "information-flow", "mcp",
+            "topology", "sheaf", "fuse", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: System :: Filesystems",
+]
+
+[project.urls]
+Homepage = "https://github.com/joelmtz19/topos"
+Repository = "https://github.com/joelmtz19/topos"
+Issues = "https://github.com/joelmtz19/topos/issues"
 
 [project.optional-dependencies]
 fuse = ["fusepy>=3.0"]
