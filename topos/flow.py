@@ -38,9 +38,15 @@ class Quota:
     """Archivos distintos que un agente (uid) abrió en la hora. Va por uid, no por sesión,
     así abrir una sesión nueva por archivo (setsid) no reinicia la cuenta — ése era el
     hueco: el tope de extracción por sesión se saltaba con un `setsid` por lectura.
+    También cuenta filas y bytes: una tabla entera en un solo archivo es un archivo, pero son
+    miles de filas (y un JSON minificado es una sola línea: para eso los bytes). Abrir un
+    archivo cobra todas sus líneas y bytes (una sola vez; si creció,
+    sólo lo nuevo), aunque sólo se lea el principio: lo que se abrió se pudo leer entero.
 
     Distinct files an agent (uid) opened this hour. Keyed by uid, not session, so spawning
-    a fresh session per read cannot reset it."""
+    a fresh session per read cannot reset it. It also counts rows and bytes: opening a file charges
+    all its lines (and bytes) once (only the growth if it grew), since whatever was opened could be
+    read in full."""
 
     def __init__(self, meta, clock=time.time):
         self.path = Path(meta) / "opens.json"
@@ -57,7 +63,13 @@ class Quota:
             return {}
         hour = int(self.clock() // 3600)
         return {k: v for k, v in data.items()
-                if k.startswith(self.boot + ":") and int(k.rsplit(":", 1)[1]) >= hour - 1}
+                if k.startswith(self.boot + ":")
+                and int(k.split("#")[0].rsplit(":", 1)[1]) >= hour - 1}
+
+    def _save(self, data):
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, self.path)
 
     def allow(self, uid, vertex, cap):
         """(permitido, cuántos van). Cuenta `vertex` si es nuevo esta hora y cabe en el tope."""
@@ -70,10 +82,30 @@ class Quota:
             return False, len(seen)
         seen.add(vertex)
         data[key] = sorted(seen)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(tmp, self.path)
+        self._save(data)
         return True, len(seen)
+
+    def allow_amount(self, uid, kind, vertex, amount, cap):
+        """(permitido, cuánto va) de `kind` ("rows" o "bytes"). Cobra lo de `vertex` que aún
+        no se cobró esta hora."""
+        data = self._load()
+        key = f"{self._key(uid)}#{kind}"
+        charged = data.get(key, {})
+        used = sum(charged.values())
+        extra = max(0, amount - charged.get(vertex, 0))
+        if not extra:
+            return True, used
+        if used + extra > cap:
+            return False, used
+        charged[vertex] = charged.get(vertex, 0) + extra
+        data[key] = charged
+        self._save(data)
+        return True, used + extra
+
+
+def count_rows(data):
+    """Líneas de un contenido; la última cuenta aunque no termine en salto."""
+    return data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
 
 
 class Sessions:

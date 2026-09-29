@@ -33,8 +33,9 @@ Cada agente corre como su propio usuario de Linux en un mundo montado con FUSE. 
 - **Presupuestos.** Topes por agente y por hora de peticiones y bytes en el proxy: un chatbot
   abusado no te vacía la cuenta del modelo.
 - **A nombre de quien pregunta.** Un bot de soporte que atiende a un cliente sólo ve la
-  intersección de sus permisos y los del cliente (`--on-behalf-of`), y un tope por agente y hora
-  de archivos distintos frena la extracción masiva.
+  intersección de sus permisos y los del cliente (`--on-behalf-of`), y topes por agente y hora de
+  archivos distintos, filas y bytes (`perm limit --files --rows --mb`) frenan la extracción
+  masiva, también la de una tabla entera metida en un solo archivo.
 - **Una bitácora a prueba de manipulación.** Cada acción se encadena por hash en un archivo que
   sólo el dueño del mundo escribe; los agentes no pueden borrarla, leerla ni firmarse como otro.
   `topos verify` detecta cualquier edición.
@@ -50,8 +51,11 @@ que el agente copia fuera de su mundo (a canales que topos no media) quedan fuer
 salvo la red, que el proxy sí media. La cadena de la bitácora es a prueba de manipulación contra
 los agentes (que no tocan el archivo) y contra ediciones casuales; anclar la última entrada
 contra un reescritor con acceso de dueño/root necesitaría un ancla externa (un registro remoto o
-un TPM), que es trabajo futuro. El tope de extracción cuenta archivos, no filas: una tabla entera
-en un archivo no queda acotada por él.
+un TPM), que es trabajo futuro. Los topes de extracción cobran todas las filas y bytes de un
+archivo al abrirlo, porque lo que se abrió se pudo leer entero: un agente con tope no puede abrir
+ni el principio de un archivo más grande que su tope (pártelo o dale una vista más chica). Las
+filas son líneas, y sólo se cuentan los archivos del mundo; una base de datos a la que el agente
+llegue por otro camino, no.
 
 ## Pruébalo en un minuto (Docker)
 

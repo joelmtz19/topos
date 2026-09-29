@@ -32,8 +32,9 @@ Each agent runs as its own Linux user in a world mounted over FUSE. On top of th
 - **Budgets.** Per-agent, per-hour request/byte limits at the proxy, so an abused chatbot can't
   drain your model account.
 - **On behalf of the asker.** A support bot serving a customer only sees the intersection of its
-  own and the customer's permissions (`--on-behalf-of`), and a per-agent hourly cap on distinct
-  files stops bulk extraction.
+  own and the customer's permissions (`--on-behalf-of`), and per-agent hourly caps on distinct
+  files, rows and bytes (`perm limit --files --rows --mb`) stop bulk extraction — including a
+  whole table sitting in one file.
 - **A tamper-evident audit log.** Every action is hash-chained into a file only the world owner
   can write; agents can't wipe it, read it, or forge another's name. `topos verify` detects any
   edit.
@@ -49,8 +50,10 @@ agent copies outside its world (into channels topos doesn't mediate) is out of s
 network, which the proxy does mediate. The audit chain is tamper-evident against agents (who
 can't touch the file at all) and against casual edits; anchoring the very latest entry against an
 owner/root-level rewrite would need an external anchor (a remote log or TPM), which is future
-work. The bulk-extraction cap counts files, not rows: a whole table in one file isn't bounded by
-it.
+work. The extraction caps charge a file's rows and bytes in full when it is opened, since
+whatever was opened could be read in full: a capped agent can't open even the head of a file
+bigger than its cap (split it, or give it a smaller view). Rows are lines, and only files in the
+world are counted — a database the agent reaches some other way isn't.
 
 ## Try it in a minute (Docker)
 

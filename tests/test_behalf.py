@@ -87,3 +87,55 @@ def test_extraction_cap_is_per_agent_not_per_session(fs):
     fs._user = lambda: "ana"
     fs._session = lambda: (1002, 1)
     op(fs, "open", "/as/ana/files/ana.json", os.O_RDONLY)
+
+
+def test_row_cap_catches_a_whole_table_in_one_file(fs):
+    # El tope por archivos no ve una tabla entera en un solo archivo; el de filas sí.
+    s = Store(fs.root)
+    s.add_bytes("clientes.csv", b"".join(b"cliente%d,correo%d\n" % (i, i) for i in range(500)))
+    s.glue(["clientes.csv"], "customers")
+    s.set_limit("bot", files=10, rows=100)
+    s.save()
+    op(fs, "open", "/files/ana.json", os.O_RDONLY)                     # 1 fila
+    op(fs, "open", "/files/ana.json", os.O_RDONLY)                     # repetir no cobra otra vez
+    assert denied(fs, "open", "/files/clientes.csv", os.O_RDONLY) == errno.EACCES
+    fs._session = lambda: (1001, 2)                                     # sesión nueva, mismo agente
+    assert denied(fs, "open", "/files/clientes.csv", os.O_RDONLY) == errno.EACCES
+    op(fs, "open", "/files/beto.json", os.O_RDONLY)                    # lo chico sigue cabiendo
+
+
+def test_row_cap_charges_only_the_growth(fs):
+    s = Store(fs.root)
+    s.add_bytes("log.txt", b"a\nb\n")
+    s.glue(["log.txt"], "customers")
+    s.set_limit("bot", rows=5)
+    s.save()
+    op(fs, "open", "/files/log.txt", os.O_RDONLY)                      # 2
+    s = Store(fs.root)
+    s.add_bytes("log.txt", b"a\nb\nc\nd\n")                            # creció
+    s.save()
+    op(fs, "open", "/files/log.txt", os.O_RDONLY)                      # +2 = 4
+    op(fs, "open", "/files/faq.md", os.O_RDONLY)                       # +1 = 5
+    assert denied(fs, "open", "/files/caro.json", os.O_RDONLY) == errno.EACCES
+
+
+def test_byte_cap_catches_a_one_line_dump(fs):
+    # Un JSON minificado es una sola «fila»: para eso está el tope de bytes.
+    s = Store(fs.root)
+    s.add_bytes("dump.json", b"[" + b",".join(b'{"id":%d}' % i for i in range(1000)) + b"]")
+    s.glue(["dump.json"], "customers")
+    s.set_limit("bot", rows=100, nbytes=1000)
+    s.save()
+    assert denied(fs, "open", "/files/dump.json", os.O_RDONLY) == errno.EACCES
+    op(fs, "open", "/files/ana.json", os.O_RDONLY)
+
+
+def test_limit_without_caps_removes_them():
+    from topos.store import Store as S
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        s = S.init(d)
+        s.set_limit("bot", files=3, rows=10)
+        assert (s.limit("bot"), s.limit("bot", "rows"), s.limit("bot", "bytes")) == (3, 10, None)
+        s.set_limit("bot")
+        assert s.limit("bot", "rows") is None

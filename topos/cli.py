@@ -147,11 +147,17 @@ def parser():
                "inscribir")
     e.add_argument("user")
     x = action(psub, "limit", cmd_perm_limit,
-               t("tope de archivos distintos por sesión (contra la extracción masiva)",
-                 "cap on distinct files per session (against bulk extraction)"), "limitar")
+               t("topes por hora de archivos, filas y bytes (contra la extracción masiva); "
+                 "sin ninguno, los quita",
+                 "per-hour caps on files, rows and bytes (against bulk extraction); "
+                 "none removes them"), "limitar")
     x.add_argument("user")
     x.add_argument("--files", "--archivos", dest="files", type=int,
-                   help=t("sin valor, quita el tope", "omit to remove the cap"))
+                   help=t("archivos distintos por hora", "distinct files per hour"))
+    x.add_argument("--rows", "--filas", dest="rows", type=int,
+                   help=t("filas (líneas) por hora", "rows (lines) per hour"))
+    x.add_argument("--mb", dest="mb", type=float,
+                   help=t("megabytes por hora", "megabytes per hour"))
     action(psub, "show", cmd_perm_show, t("tabla de permisos efectivos", "effective permission table"),
            "ver")
     action(psub, "check", cmd_perm_check, t("obstrucciones al pegado", "gluing obstructions"), "revisar")
@@ -468,10 +474,14 @@ def cmd_perm_enroll(a):
 
 def cmd_perm_limit(a):
     s = Store.find()
-    s.set_limit(a.user, a.files)
+    nbytes = int(a.mb * 1_000_000) if a.mb is not None else None
+    s.set_limit(a.user, a.files, a.rows, nbytes)
     s.save()
-    print(t(f"{a.user}: tope de {a.files} archivos por sesión", f"{a.user}: cap of {a.files} files per session")
-          if a.files is not None else t(f"{a.user}: sin tope", f"{a.user}: no cap"))
+    parts = [t(f"{n} {es}", f"{n} {en}") for n, es, en in
+             ((a.files, "archivos", "files"), (a.rows, "filas", "rows"), (a.mb, "MB", "MB"))
+             if n is not None]
+    print(t(f"{a.user}: tope de {', '.join(parts)} por hora", f"{a.user}: cap of {', '.join(parts)} per hour")
+          if parts else t(f"{a.user}: sin tope", f"{a.user}: no cap"))
 
 
 def cmd_perm_show(a):
@@ -487,6 +497,9 @@ def cmd_perm_show(a):
         print(f"{v:<{width}}  " + "  ".join(f"{r.mode(v, u):>6}" for u in users))
     print("\n" + t("letra = concedido   - = negado   · = sin sección (se niega)   ! = conflicto",
                    "letter = granted   - = denied   · = no section (denied)   ! = conflict"))
+    for user, caps in sorted(s.state.get("limits", {}).items()):
+        shown = ", ".join(f"{v} {k}" for k, v in caps.items())
+        print(t(f"tope por hora de {user}: {shown}", f"hourly cap for {user}: {shown}"))
 
 
 def cmd_perm_check(a):

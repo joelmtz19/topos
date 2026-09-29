@@ -291,16 +291,21 @@ class Store:
         if user not in self.state["enrolled"]:
             self.state["enrolled"].append(user)
 
-    def set_limit(self, user, files=None):
-        """Tope de archivos distintos que una sesión de `user` puede abrir; None lo quita."""
+    def set_limit(self, user, files=None, rows=None, nbytes=None):
+        """Topes por hora de `user`: archivos distintos, filas (líneas) y bytes que puede abrir.
+        Sin ninguno, se quitan.
+        Per-hour caps for `user`: distinct files, rows (lines) and bytes it may open; none
+        removes them."""
         limits = self.state.setdefault("limits", {})
-        if files is None:
-            limits.pop(user, None)
+        caps = {k: int(v) for k, v in (("files", files), ("rows", rows), ("bytes", nbytes))
+                if v is not None}
+        if caps:
+            limits[user] = caps
         else:
-            limits[user] = {"files": int(files)}
+            limits.pop(user, None)
 
-    def limit(self, user):
-        return self.state.get("limits", {}).get(user, {}).get("files")
+    def limit(self, user, kind="files"):
+        return self.state.get("limits", {}).get(user, {}).get(kind)
 
     # -- red / network -----------------------------------------------------
 

@@ -40,7 +40,7 @@ try:
 except ImportError:  # Debian empaqueta fusepy con su propio nombre
     from fusepy import FUSE, FuseOSError, Operations, fuse_get_context
 
-from .flow import Quota, Sessions, session_of
+from .flow import Quota, Sessions, count_rows, session_of
 from .i18n import t
 from .store import Store, StoreError
 
@@ -119,9 +119,9 @@ class ToposFS(Operations):
 
     def _record_read(self, vertex):
         """El que abre `vertex` para leer carga su contenido y sus fuentes. Si su usuario
-        tiene tope de archivos, abrir más de la cuenta en la hora se niega: leer cientos de
-        registros es una extracción, no un uso normal. El tope va por agente (uid) y por hora,
-        no por sesión, así que abrir una sesión nueva por archivo no lo reinicia."""
+        tiene topes (archivos, filas, bytes), abrir más de la cuenta en la hora se niega: leer
+        cientos de registros es una extracción, no un uso normal. Los topes van por agente (uid)
+        y por hora, no por sesión, así que abrir una sesión nueva por archivo no los reinicia."""
         if vertex is None or self._is_owner():
             return
         s = self._store()
@@ -131,13 +131,27 @@ class ToposFS(Operations):
         if cap is not None:
             allowed, seen = self.quota.allow(uid, vertex, cap)
             if not allowed:
-                from . import agent
-                agent.log({"t": time.time(), "agent": user, "via": "fuse", "tool": "read",
-                           "args": {"file": vertex}, "status": "denied",
-                           "result": t(f"tope de {cap} archivos/hora ({seen} ya): posible extracción",
-                                       f"cap of {cap} files/hour ({seen} already): possible extraction")})
-                raise FuseOSError(errno.EACCES)
+                self._deny_extraction(user, vertex, t(
+                    f"tope de {cap} archivos/hora ({seen} ya): posible extracción",
+                    f"cap of {cap} files/hour ({seen} already): possible extraction"))
+        for kind, measure, es, en in (("rows", count_rows, "filas", "rows"),
+                                      ("bytes", len, "bytes", "bytes")):
+            cap = s.limit(user, kind)
+            if cap is None:
+                continue
+            amount = measure(self._content(s, vertex))
+            allowed, used = self.quota.allow_amount(uid, kind, vertex, amount, cap)
+            if not allowed:
+                self._deny_extraction(user, vertex, t(
+                    f"tope de {cap} {es}/hora ({used} ya, este archivo tiene {amount}): posible extracción",
+                    f"cap of {cap} {en}/hour ({used} already, this file has {amount}): possible extraction"))
         self.sessions.add(uid, sid, {vertex} | s.sources(vertex), opened=vertex)
+
+    def _deny_extraction(self, user, vertex, why):
+        from . import agent
+        agent.log({"t": time.time(), "agent": user, "via": "fuse", "tool": "read",
+                   "args": {"file": vertex}, "status": "denied", "result": why})
+        raise FuseOSError(errno.EACCES)
 
     def _user(self):
         uid = self._caller()[0]
